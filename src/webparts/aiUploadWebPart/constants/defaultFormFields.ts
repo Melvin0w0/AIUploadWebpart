@@ -1,5 +1,11 @@
 export const NAME_LABEL: string = 'Name';
 export const REGISTRATION_NUMBER_LABEL: string = 'Registration Number';
+export const SENDER_LABEL: string = 'Sender';
+
+export const RECEIVER_LABEL: string = 'Receiver';
+
+export const SUBJECT_LABEL: string = 'Subject';
+export const REF_NO_LABEL: string = 'Ref No';
 
 export function isNameField(label: string): boolean {
   return (label || '').trim().toLowerCase() === NAME_LABEL.toLowerCase();
@@ -7,6 +13,22 @@ export function isNameField(label: string): boolean {
 
 export function isRegistrationNumberField(label: string): boolean {
   return (label || '').trim().toLowerCase() === REGISTRATION_NUMBER_LABEL.toLowerCase();
+}
+
+export function isSenderField(label: string): boolean {
+  return (label || '').trim().toLowerCase() === SENDER_LABEL.toLowerCase();
+}
+
+export function isReceiverField(label: string): boolean {
+  return (label || '').trim().toLowerCase() === RECEIVER_LABEL.toLowerCase();
+}
+
+export function isSubjectField(label: string): boolean {
+  return (label || '').trim().toLowerCase() === SUBJECT_LABEL.toLowerCase();
+}
+
+export function isRefNoField(label: string): boolean {
+  return (label || '').trim().toLowerCase() === REF_NO_LABEL.toLowerCase();
 }
 
 export const DEFAULT_FORM_FIELDS: string[] = [

@@ -1,3 +1,6 @@
+import { IOcrPageResult } from './IPdfOcr';
+import { dearSirBandRegion, ISignatureAnalysis } from './signatureSender';
+
 export interface IAiExtractionConfig {
   endpoint: string;
   apiKey: string;
@@ -12,15 +15,49 @@ export function isAiExtractionConfigured(config: IAiExtractionConfig): boolean {
 export async function extractFieldsWithAi(
   ocrText: string,
   fieldLabels: string[],
-  config: IAiExtractionConfig
+  config: IAiExtractionConfig,
+  page?: IOcrPageResult,
+  signature?: ISignatureAnalysis,
+  receiverName?: string,
+  subjectText?: string,
+  refNo?: string
 ): Promise<{ [label: string]: string }> {
   const text = (ocrText || '').trim();
-  if (!text || fieldLabels.length === 0) {
+  if (fieldLabels.length === 0) {
     return {};
   }
 
   const clipped = text.length > 14000 ? text.substring(0, 14000) : text;
-  const payload = buildRequest(clipped, fieldLabels, config);
+  const images = await buildPageImages(page, signature);
+  if (!clipped && images.length === 0) {
+    return {};
+  }
+
+  try {
+    return await requestExtraction(clipped, fieldLabels, config, images, signature, receiverName, subjectText, refNo);
+  } catch {
+    if (images.length === 0) {
+      return {};
+    }
+    try {
+      return await requestExtraction(clipped, fieldLabels, config, [], signature, receiverName, subjectText, refNo);
+    } catch {
+      return {};
+    }
+  }
+}
+
+async function requestExtraction(
+  ocrText: string,
+  fieldLabels: string[],
+  config: IAiExtractionConfig,
+  images: IChatImage[],
+  signature?: ISignatureAnalysis,
+  receiverName?: string,
+  subjectText?: string,
+  refNo?: string
+): Promise<{ [label: string]: string }> {
+  const payload = buildRequest(ocrText, fieldLabels, config, images, signature, receiverName, subjectText, refNo);
   let response: Response;
   try {
     response = await fetch(payload.url, {
@@ -46,7 +83,12 @@ export async function extractFieldsWithAi(
 function buildRequest(
   ocrText: string,
   fieldLabels: string[],
-  config: IAiExtractionConfig
+  config: IAiExtractionConfig,
+  images: IChatImage[],
+  signature?: ISignatureAnalysis,
+  receiverName?: string,
+  subjectText?: string,
+  refNo?: string
 ): { url: string; headers: { [key: string]: string }; body: string } {
   const endpoint = config.endpoint.replace(/\/+$/, '');
   const isOpenAi = endpoint.indexOf('api.openai.com') >= 0;
@@ -64,8 +106,13 @@ function buildRequest(
     headers['api-key'] = config.apiKey.trim();
   }
 
+  const prompt = buildUserPrompt(ocrText, fieldLabels, images.length > 0, signature, receiverName, subjectText, refNo);
+  const userContent: string | IChatPart[] = images.length > 0
+    ? buildImagePromptParts(prompt, images)
+    : prompt;
+
   const requestBody: {
-    messages: { role: string; content: string }[];
+    messages: { role: string; content: string | IChatPart[] }[];
     temperature: number;
     max_tokens: number;
     model?: string;
@@ -73,11 +120,11 @@ function buildRequest(
     messages: [
       {
         role: 'system',
-        content: 'You extract metadata from OCR text of AECOM project correspondence. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording. Do not invent values.'
+        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image, including logos and letterheads. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. For logos, use the official organization name. Sender is the printed person name below Yours sincerely or Yours faithfully and above the job title. Receiver is ONLY the first line of the consecutive lines immediately above Dear Sir. Subject is ONLY the underlined words after Dear Sir, not the rest of the sentence and not later underlined text. Ref No is the value to the right of Our Ref:. Do not invent values.'
       },
       {
         role: 'user',
-        content: buildUserPrompt(ocrText, fieldLabels)
+        content: userContent
       }
     ],
     temperature: 0,
@@ -91,19 +138,27 @@ function buildRequest(
   return { url, headers, body };
 }
 
-function buildUserPrompt(ocrText: string, fieldLabels: string[]): string {
+function buildUserPrompt(
+  ocrText: string,
+  fieldLabels: string[],
+  hasImage: boolean,
+  signature?: ISignatureAnalysis,
+  receiverName?: string,
+  subjectText?: string,
+  refNo?: string
+): string {
   const fieldHelp = [
     'Name: document name or identifier. Registration Number must use this same value.',
     'Registration Number: always copy Name exactly. Do not invent a different value.',
-    'Leading BL: leading business line. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water. Abbreviations such as ARC, BEG, ENV, GEO, ISD, LSM, MEP, PCM, PCC, TRA, UNC, UAP, WAT are also accepted.',
+    'Leading BL: leading business line. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water. Abbreviations such as ARC, BEG, ENV, GEO, ISD, LSM, MEP, PCM, PCC, TRA, UNC, UAP, WAT are also accepted. If an AECOM business-line logo or name is visible, select that listed value.',
     'Project Number: up to 8 digits only. Copy digits only and omit letters, spaces, and extra characters.',
     'Sub-Project Number: sub-project or task number',
-    'Organization: company or organization',
-    'Sender: who sent the document',
-    'Receiver: who the document is addressed to',
-    'Subject: subject or title of the document',
+    'Organization: company, consultant, contractor, or government department. Prefer the letterhead or logo at the top of the first page, even when OCR missed it. Use the official English name when it is clear, for example AECOM, Civil Engineering and Development Department, Highways Department, Drainage Services Department, Water Supplies Department.',
+    'Sender: below Yours sincerely / Yours faithfully / Yours truly, and above the job title (for example Chief Engineer, Director, Manager), copy the printed person name. If that name is in parentheses, copy the inside text only. Skip (signed), the job title, and the company name. OCR may read sincerely as sincerelt.',
+    'Receiver: immediately above Dear Sir there are several consecutive lines (name then address). Copy ONLY the first of those consecutive lines. Do not copy the later address lines, Dear Sir, Our Ref, or the date.',
+    'Subject: after Dear Sir, copy ONLY the words that sit on an underline. If the underline is under part of a sentence, copy only that underlined phrase, not the whole sentence. Do not use later underlined text further down the letter. You may omit a leading Re: or Subject: label.',
     'File No: file number',
-    'Ref No: reference number',
+    'Ref No: copy only the value to the right of Our Ref: / Our Ref :. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
     'Issue Date: issue or document date',
     'Attachment: attachments mentioned',
     'Scan: scan number or scan mark',
@@ -112,8 +167,19 @@ function buildUserPrompt(ocrText: string, fieldLabels: string[]): string {
     'cc to AECOM: CC line if AECOM is copied'
   ].join('\n');
 
-  return [
-    'Extract these fields from the OCR text of a document. The layout changes between files and labels may be missing or different.',
+  const sourceLines = hasImage
+    ? [
+      'Extract these fields from the first page of a scanned document.',
+      'Images: full first page, letterhead/logo crop, the Dear Sir area for Receiver, the opening body for the underlined Subject, then the signature block if detected.',
+      'Read logos and letterheads for Organization. For Receiver, copy only the first of the consecutive lines immediately above Dear Sir. For Subject, copy only the underlined words after Dear Sir, not the surrounding sentence. For Sender, copy the person name below Yours sincerely / Yours faithfully and above the job title.'
+    ]
+    : [
+      'Extract these fields from the OCR text of a document.',
+      'Sender is the person name below Yours sincerely or Yours faithfully and above the job title. Receiver is only the first of the consecutive lines immediately above Dear Sir. Subject is only the underlined words after Dear Sir, not the whole sentence.'
+    ];
+
+  const parts = [
+    sourceLines.join(' '),
     'Return a JSON object whose keys are exactly:',
     fieldLabels.join(', '),
     '',
@@ -121,8 +187,145 @@ function buildUserPrompt(ocrText: string, fieldLabels: string[]): string {
     fieldHelp,
     '',
     'OCR text:',
-    ocrText
-  ].join('\n');
+    ocrText || '(none)'
+  ];
+  if (signature && signature.senderName) {
+    parts.push('', 'Detected Sender from the name below Yours sincerely/faithfully and above the job title:', signature.senderName);
+  } else if (signature && signature.textBelow) {
+    parts.push('', 'OCR immediately below the signature:', signature.textBelow);
+  } else {
+    parts.push('', 'Look below Yours sincerely / Yours faithfully for the person name above the job title. That is Sender.');
+  }
+  if (receiverName && receiverName.trim()) {
+    parts.push('', 'Detected Receiver (first of the consecutive lines above Dear Sir):', receiverName.trim());
+  } else {
+    parts.push('', 'Look at the consecutive lines immediately above Dear Sir. Receiver is only the first of those lines, not the address lines below it.');
+  }
+  if (subjectText && subjectText.trim()) {
+    parts.push('', 'Detected Subject from the underlined words after Dear Sir:', subjectText.trim());
+  } else {
+    parts.push('', 'Look after Dear Sir for words sitting on an underline. Subject is only those underlined words, not the rest of the sentence and not later underlines.');
+  }
+  if (refNo && refNo.trim()) {
+    parts.push('', 'Detected Ref No from the value to the right of Our Ref:', refNo.trim());
+  } else {
+    parts.push('', 'Find Our Ref: or Our Ref :. Ref No is only the value to the right of that label, not Your Ref.');
+  }
+  return parts.join('\n');
+}
+
+function buildImagePromptParts(prompt: string, images: IChatImage[]): IChatPart[] {
+  const parts: IChatPart[] = [{ type: 'text', text: prompt }];
+  images.forEach((image) => {
+    parts.push({ type: 'text', text: image.label });
+    parts.push({
+      type: 'image_url',
+      image_url: {
+        url: image.url,
+        detail: image.detail
+      }
+    });
+  });
+  return parts;
+}
+
+async function buildPageImages(
+  page?: IOcrPageResult,
+  signature?: ISignatureAnalysis
+): Promise<IChatImage[]> {
+  const source = page && page.imageUrl ? page.imageUrl.trim() : '';
+  if (!source) {
+    return [];
+  }
+
+  try {
+    const image = await loadImage(source);
+    const images: IChatImage[] = [];
+    const fullPage = encodeImageRegion(image, 0, 0, image.width, image.height, 1024, 0.62);
+    if (fullPage) {
+      images.push({ url: fullPage, detail: 'low', label: 'Full first page:' });
+    }
+    const band = dearSirBandRegion(page);
+    if (band) {
+      const crop = encodeImageRegion(
+        image,
+        band.x0,
+        band.y0,
+        Math.max(8, band.x1 - band.x0),
+        Math.max(8, band.y1 - band.y0),
+        1280,
+        0.78
+      );
+      if (crop) {
+        images.push({
+          url: crop,
+          detail: 'high',
+          label: 'Letter body. Receiver is the first of the consecutive lines immediately above Dear Sir. Subject is ONLY the underlined words after Dear Sir, not the rest of the sentence:'
+        });
+      }
+    }
+    const region = signature && signature.region;
+    if (region) {
+      const below = Math.max(110, Math.round(image.height * 0.12));
+      const sx = Math.max(0, region.x0 - 12);
+      const sy = Math.max(0, region.y0 - 8);
+      const crop = encodeImageRegion(
+        image,
+        sx,
+        sy,
+        image.width - sx,
+        Math.min(image.height - sy, region.y1 - region.y0 + below + 8),
+        1280,
+        0.75
+      );
+      if (crop) {
+        images.push({
+          url: crop,
+          detail: 'high',
+          label: 'Closing block. Sender is the person name below Yours sincerely/faithfully and above the job title:'
+        });
+      }
+    }
+    return images;
+  } catch {
+    return [];
+  }
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to load page image.'));
+    image.src = url;
+  });
+}
+
+function encodeImageRegion(
+  image: HTMLImageElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  maxWidth: number,
+  quality: number
+): string | undefined {
+  if (sw < 8 || sh < 8) {
+    return undefined;
+  }
+  const scale = sw > maxWidth ? maxWidth / sw : 1;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return undefined;
+  }
+  context.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', quality);
+  canvas.width = 0;
+  canvas.height = 0;
+  return dataUrl.indexOf('data:image/jpeg') === 0 ? dataUrl : undefined;
 }
 
 function parseFieldJson(content: string, fieldLabels: string[]): { [label: string]: string } {
@@ -167,6 +370,21 @@ function stripFence(content: string): string {
   const withoutOpen = trimmed.replace(/^```json\s*/i, '').replace(/^```\s*/, '');
   const close = withoutOpen.lastIndexOf('```');
   return close >= 0 ? withoutOpen.substring(0, close).trim() : withoutOpen.trim();
+}
+
+interface IChatImage {
+  url: string;
+  detail: 'low' | 'high';
+  label: string;
+}
+
+interface IChatPart {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: {
+    url: string;
+    detail: 'low' | 'high';
+  };
 }
 
 interface IChatCompletionResponse {

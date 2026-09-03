@@ -21,7 +21,7 @@ import { locFormat } from '../loc/locFormat';
 import { PdfOcrService } from '../services/PdfOcrService';
 import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
 import PdfHighlightViewer from './PdfHighlightViewer';
-import { DEFAULT_FORM_FIELDS, isNameField, isRegistrationNumberField, isRequiredField, missingRequiredFields } from '../constants/defaultFormFields';
+import { DEFAULT_FORM_FIELDS, isNameField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
 import { nameFromPdfFile } from '../constants/incomingName';
 import {
   canonicalLeadingBl,
@@ -33,8 +33,9 @@ import {
   isValidProjectNumber,
   sanitizeProjectNumber
 } from '../constants/projectNumber';
-import { extractFieldValues } from '../services/fieldExtractor';
+import { extractFieldValues, extractOurRefNo } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
+import { analyzeSignature, asPersonName, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
 import { SharePointUploadService } from '../services/SharePointUploadService';
 import {
   buildUploadFileUrl,
@@ -765,22 +766,27 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         }
       });
 
-      const filled = await this._fillFields(result.pages);
+      let filled: { fields: IFormField[]; info: string | undefined };
+      try {
+        filled = await this._fillFields(result.pages);
+      } catch {
+        filled = { fields: this.state.fields, info: undefined };
+      }
       this.setState({
         pages: result.pages,
         currentPage: 1,
         isProcessing: false,
         progress: undefined,
         fields: filled.fields,
-        error: filled.error,
+        error: undefined,
         info: filled.info
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : strings.OcrFailed;
+      const message = err instanceof Error ? err.message : '';
       this.setState({
         isProcessing: false,
         progress: undefined,
-        error: message
+        error: message && message !== 'Error' ? message : strings.OcrFailed
       });
     }
   };
@@ -791,9 +797,44 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     info: string | undefined;
   }> => {
     const labels = this.state.fields.map((field) => field.label);
-    const keywordValues = extractFieldValues(pages, labels);
+    const firstPage = pages && pages.length > 0 ? pages[0] : undefined;
+    const closingPage = pages && pages.length > 0 ? pages[pages.length - 1] : undefined;
+    let keywordValues: { [label: string]: string } = {};
+    try {
+      keywordValues = extractFieldValues(pages || [], labels);
+    } catch {
+      keywordValues = {};
+    }
+    let signature = await analyzeSignature(closingPage).catch(() => ({
+      region: undefined,
+      senderName: '',
+      textBelow: ''
+    }));
+    if (firstPage && closingPage && firstPage.pageNumber !== closingPage.pageNumber) {
+      signature = {
+        ...signature,
+        region: undefined
+      };
+    }
+    let receiverName = '';
+    let subjectText = '';
+    let refNo = '';
+    try {
+      receiverName = extractReceiverAboveDearSir(firstPage);
+    } catch {
+      receiverName = '';
+    }
+    try {
+      subjectText = await extractSubjectBelowDearSir(firstPage);
+    } catch {
+      subjectText = '';
+    }
+    try {
+      refNo = extractOurRefNo(pages || []);
+    } catch {
+      refNo = '';
+    }
     let aiValues: { [label: string]: string } = {};
-    let error: string | undefined;
     let info: string | undefined;
     const aiConfig = {
       endpoint: this.props.azureOpenAiEndpoint || '',
@@ -804,32 +845,53 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
     if (isAiExtractionConfigured(aiConfig)) {
       try {
-        const ocrText = pages.map((page) => page.text || '').join('\n');
-        aiValues = await extractFieldsWithAi(ocrText, labels, aiConfig);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : '';
-        error = message === 'CORS' ? strings.AiCorsFailed : strings.AiExtractFailed;
+        const ocrText = (pages || []).map((page) => page.text || '').join('\n');
+        aiValues = await extractFieldsWithAi(ocrText, labels, aiConfig, firstPage, signature, receiverName, subjectText, refNo);
+      } catch {
+        aiValues = {};
       }
     } else {
       info = strings.AiNotConfiguredHint;
     }
 
-    return {
-      error,
-      info,
-      fields: this._applyPdfFileName(this.state.fields.map((field) => {
+    let fields = this.state.fields;
+    try {
+      fields = this._applyPdfFileName(this.state.fields.map((field) => {
         if (isNameField(field.label)) {
           return field;
         }
         const aiValue = aiValues[field.label];
         const keywordValue = keywordValues[field.label];
-        let value = (aiValue && aiValue.trim()) || keywordValue || '';
+        let value = '';
+        if (isSenderField(field.label)) {
+          value = signature.senderName || asPersonName(aiValue || '');
+        } else if (isReceiverField(field.label)) {
+          const aiReceiver = (aiValue || '').trim();
+          const fromAi = aiReceiver && !/^dear\b/i.test(aiReceiver)
+            ? aiReceiver.split(/\r?\n/)[0].trim()
+            : '';
+          value = receiverName || fromAi;
+        } else if (isSubjectField(field.label)) {
+          const aiSubject = (aiValue || '').trim();
+          value = subjectText || aiSubject;
+        } else if (isRefNoField(field.label)) {
+          value = refNo || (aiValue || '').trim();
+        } else {
+          value = (aiValue && aiValue.trim()) || keywordValue || '';
+        }
         value = this._normalizeFieldValue(field.label, value);
         return {
           ...field,
           value
         };
-      }), this.state.file ? this.state.file.name : undefined)
+      }), this.state.file ? this.state.file.name : undefined);
+    } catch {
+      fields = this.state.fields;
+    }
+    return {
+      error: undefined,
+      info,
+      fields
     };
   };
 
@@ -899,9 +961,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _revokePageUrls = (pages: IOcrPageResult[]): void => {
-    pages.forEach((page) => {
-      if (page.imageUrl.indexOf('blob:') === 0) {
-        URL.revokeObjectURL(page.imageUrl);
+    (pages || []).forEach((page) => {
+      const url = page && page.imageUrl ? page.imageUrl : '';
+      if (url.indexOf('blob:') === 0) {
+        URL.revokeObjectURL(url);
       }
     });
   };

@@ -1,3 +1,4 @@
+import { isReceiverField, isRefNoField, isSenderField, isSubjectField } from '../constants/defaultFormFields';
 import { IOcrPageResult, IOcrWord } from './IPdfOcr';
 import { joinOcrWords } from './ocrSelection';
 
@@ -42,6 +43,9 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
   );
 
   fieldLabels.forEach((label) => {
+    if (isSenderField(label) || isReceiverField(label) || isSubjectField(label) || isRefNoField(label)) {
+      return;
+    }
     const layoutValue = (fromLayout[label] || '').trim();
     const textValue = (fromText[label] || '').trim();
     const chosen = layoutValue || textValue;
@@ -51,6 +55,157 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
   });
 
   return values;
+}
+
+export function extractOurRefNo(pages: IOcrPageResult[]): string {
+  const list = pages || [];
+  for (let index = 0; index < list.length; index++) {
+    const page = list[index];
+    if (!page) {
+      continue;
+    }
+    try {
+      const fromWords = ourRefOnPage(page);
+      if (fromWords) {
+        return fromWords;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return '';
+}
+
+function ourRefOnPage(page: IOcrPageResult): string {
+  const words = (page.words || []).slice().sort((left, right) => {
+    if (Math.abs(left.y0 - right.y0) > 8) {
+      return left.y0 - right.y0;
+    }
+    return left.x0 - right.x0;
+  });
+  for (let index = 0; index < words.length; index++) {
+    const refIndex = ourRefWordIndex(words, index);
+    if (refIndex < 0) {
+      continue;
+    }
+    const value = valueAfterRef(words, refIndex);
+    if (value) {
+      return value;
+    }
+  }
+  return ourRefFromText(page.text || '');
+}
+
+function ourRefWordIndex(words: IOcrWord[], index: number): number {
+  const key = normalizeToken(words[index].text || '');
+  if (/^ourr+e+fs?(no|number)?$/.test(key) || key === 'ourreference') {
+    return index;
+  }
+  if (!isRefWord(key)) {
+    return -1;
+  }
+  const prev = words[index - 1];
+  const prevKey = prev ? normalizeToken(prev.text || '') : '';
+  if (prevKey === 'our' || prevKey === '0ur' || prevKey === 'ou') {
+    return index;
+  }
+  return -1;
+}
+
+function isRefWord(key: string): boolean {
+  return key === 'reference' ||
+    key === 'refno' ||
+    /^r+e+fs?(no|number)?$/.test(key);
+}
+
+function valueAfterRef(words: IOcrWord[], index: number): string {
+  let start = index + 1;
+  if (words[start] && /^[:.\-]+$/.test((words[start].text || '').trim())) {
+    start++;
+  }
+  const nextKey = words[start] ? normalizeToken(words[start].text || '') : '';
+  if (nextKey === 'no' || nextKey === 'number') {
+    start++;
+    if (words[start] && /^[:.\-]+$/.test((words[start].text || '').trim())) {
+      start++;
+    }
+  }
+
+  const label = words[index];
+  const lineMid = (label.y0 + label.y1) / 2;
+  const lineHeight = Math.max(label.y1 - label.y0, 1);
+  const collected: IOcrWord[] = [];
+  for (let cursor = start; cursor < words.length; cursor++) {
+    const word = words[cursor];
+    const wordMid = (word.y0 + word.y1) / 2;
+    if (Math.abs(wordMid - lineMid) > lineHeight * 0.8) {
+      break;
+    }
+    if (word.x0 < label.x1 - 6) {
+      continue;
+    }
+    if (isRefValueStop(word.text || '')) {
+      break;
+    }
+    collected.push(word);
+  }
+  const sameLine = joinOcrWords(collected).replace(/^[:.\s-]+/, '').trim();
+  if (sameLine) {
+    return sameLine;
+  }
+
+  const below: IOcrWord[] = [];
+  for (let cursor = start; cursor < words.length; cursor++) {
+    const word = words[cursor];
+    if (word.y0 < label.y1 - lineHeight * 0.2) {
+      continue;
+    }
+    if (word.y0 > label.y1 + lineHeight * 1.8) {
+      break;
+    }
+    if (isRefValueStop(word.text || '')) {
+      break;
+    }
+    below.push(word);
+  }
+  return joinOcrWords(below).replace(/^[:.\s-]+/, '').trim();
+}
+
+function isRefValueStop(text: string): boolean {
+  const key = normalizeToken(text);
+  return key === 'date' ||
+    key === 'tel' ||
+    key === 'fax' ||
+    key === 'email' ||
+    key === 'our' ||
+    key === 'your' ||
+    key === 'yr' ||
+    key === 'page' ||
+    key === 'dear' ||
+    isRefLabelToken(key);
+}
+
+function isRefLabelToken(key: string): boolean {
+  return /^(our|your|yr|my)?r+efs?(no|number)?$/.test(key) || key === 'reference' || key === 'referenceno';
+}
+
+function ourRefFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  const pattern = /\bour\s+r+e+f(?:erence)?(?:\s*no(?:\.)?)?\s*[:.\-]?\s*(.+)$/i;
+  for (let index = 0; index < lines.length; index++) {
+    const match = lines[index].match(pattern);
+    if (!match) {
+      continue;
+    }
+    const value = (match[1] || '')
+      .replace(/\b(your\s+r+e+f|date|tel|fax|email)\b.*$/i, '')
+      .replace(/^[:.\s-]+/, '')
+      .trim();
+    if (value) {
+      return value;
+    }
+  }
+  return '';
 }
 
 function extractFromWords(words: IOcrWord[], fieldLabels: string[]): { [label: string]: string } {

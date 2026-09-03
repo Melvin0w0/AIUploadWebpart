@@ -8,7 +8,7 @@ export interface ISelectionRect {
 }
 
 export function joinOcrWords(words: IOcrWord[]): string {
-  if (words.length === 0) {
+  if (!words || words.length === 0) {
     return '';
   }
 
@@ -20,17 +20,21 @@ export function joinOcrWords(words: IOcrWord[]): string {
     return left.x0 - right.x0;
   });
 
-  let text = sorted[0].text;
+  let text = wordText(sorted[0]);
   for (let index = 1; index < sorted.length; index++) {
     const previous = sorted[index - 1];
     const current = sorted[index];
     const lineHeight = Math.max(previous.y1 - previous.y0, 1);
     const isNewLine = current.y0 - previous.y0 > lineHeight * 0.6;
-    text += isNewLine ? '\n' : joinGap(previous.text, current.text);
-    text += current.text;
+    text += isNewLine ? '\n' : joinGap(wordText(previous), wordText(current));
+    text += wordText(current);
   }
 
   return text.trim();
+}
+
+function wordText(word: IOcrWord): string {
+  return word && word.text ? word.text : '';
 }
 
 export function wordsInRect(words: IOcrWord[], rect: ISelectionRect): number[] {
@@ -60,8 +64,8 @@ export function wordIndexAtPoint(words: IOcrWord[], x: number, y: number): numbe
 }
 
 function joinGap(left: string, right: string): string {
-  const last = left.charAt(left.length - 1);
-  const first = right.charAt(0);
+  const last = (left || '').charAt((left || '').length - 1);
+  const first = (right || '').charAt(0);
   const cjk = /[\u3400-\u9FFF]/;
   if (cjk.test(last) && cjk.test(first)) {
     return '';

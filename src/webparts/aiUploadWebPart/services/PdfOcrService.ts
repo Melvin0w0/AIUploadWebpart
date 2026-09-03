@@ -9,6 +9,13 @@ const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm';
 
 let pdfWorkerReady: Promise<void> | undefined;
 
+function pageHasClosing(text: string): boolean {
+  const key = ' ' + (text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+  return key.indexOf(' yours sincere') >= 0 ||
+    key.indexOf(' yours faithful') >= 0 ||
+    key.indexOf(' yours truly') >= 0;
+}
+
 function ensurePdfJsWorker(): Promise<void> {
   if (!pdfWorkerReady) {
     pdfWorkerReady = loadPdfJsWorker();
@@ -56,14 +63,18 @@ export class PdfOcrService {
       const pdf = await pdfjsLib.getDocument({
         data
       }).promise;
-      const totalPages = pdf.numPages;
+      if (pdf.numPages < 1) {
+        throw new Error('The PDF has no pages to recognize.');
+      }
+
       const pages: IOcrPageResult[] = [];
+      const totalPages = pdf.numPages;
 
       for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         onProgress({
           page: pageNum,
           totalPages,
-          percent: ((pageNum - 1) / totalPages) * 100,
+          percent: Math.round(((pageNum - 1) / totalPages) * 100),
           status: `Rendering page ${pageNum} of ${totalPages}`
         });
 
@@ -72,12 +83,12 @@ export class PdfOcrService {
         onProgress({
           page: pageNum,
           totalPages,
-          percent: ((pageNum - 0.5) / totalPages) * 100,
+          percent: Math.round(((pageNum - 0.5) / totalPages) * 100),
           status: `OCR page ${pageNum} of ${totalPages}`
         });
 
         const result = await worker.recognize(canvas);
-        const pageText = result.data.text.trim();
+        const pageText = (result.data.text || '').trim();
         const imageUrl = await PdfOcrService._canvasToObjectUrl(canvas);
         const ocrWords = result.data.words || [];
         const pageResult: IOcrPageResult = {
@@ -103,11 +114,15 @@ export class PdfOcrService {
 
         canvas.width = 0;
         canvas.height = 0;
+
+        if (pageHasClosing(pageText)) {
+          break;
+        }
       }
 
       onProgress({
-        page: totalPages,
-        totalPages,
+        page: pages.length,
+        totalPages: pages.length,
         percent: 100,
         status: 'Completed'
       });
