@@ -43,6 +43,9 @@ declare interface IAiUploadWebPartStrings {
   ProjectNumberDescription: string;
   RegistrationNumberPlaceholder: string;
   RegistrationNumberDescription: string;
+  IssueDateLabel: string;
+  IssueDatePlaceholder: string;
+  IssueDateDescription: string;
   UploadInvalidProjectNumber: string;
   UploadNeedFile: string;
   UploadMissingFields: string;

@@ -1,6 +1,9 @@
 import * as React from 'react';
 import {
+  DatePicker,
+  DayOfWeek,
   DefaultButton,
+  defaultDatePickerStrings,
   Dropdown,
   IconButton,
   IDropdownOption,
@@ -40,6 +43,13 @@ import {
   SUB_PROJECT_NONE,
   SUB_PROJECT_NUMBER_OPTIONS
 } from '../constants/subProjectNumber';
+import {
+  formatIssueDate,
+  isIssueDateField,
+  ISSUE_DATE_DISPLAY_LABEL,
+  parseIssueDate,
+  sanitizeIssueDate
+} from '../constants/issueDate';
 import { extractFieldValues, extractOurRefNo, extractYourRefNo } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
 import { analyzeSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
@@ -299,6 +309,36 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
                         />
+                      ) : isIssueDateField(field.label) ? (
+                        <Stack className={styles.fieldInput}>
+                          <Label>{ISSUE_DATE_DISPLAY_LABEL}</Label>
+                          <DatePicker
+                            value={parseIssueDate(field.value)}
+                            onSelectDate={(date) => this._onIssueDateSelect(field.id, date)}
+                            formatDate={(date) => date ? formatIssueDate(date) : ''}
+                            parseDateFromString={(text) => parseIssueDate(text) || null}
+                            placeholder={strings.IssueDatePlaceholder || 'dd/MM/yyyy'}
+                            allowTextInput={true}
+                            firstDayOfWeek={DayOfWeek.Monday}
+                            strings={defaultDatePickerStrings}
+                            isRequired={isRequiredField(field.label)}
+                            ariaLabel={ISSUE_DATE_DISPLAY_LABEL}
+                            calloutProps={{
+                              setInitialFocus: false,
+                              onClick: (event) => event.preventDefault()
+                            }}
+                            textField={{
+                              description: strings.IssueDateDescription || 'Date format: dd/MM/yyyy',
+                              errorMessage: this._requiredError(field, markRequired),
+                              onFocus: () => this._setActiveField(field.id),
+                              onKeyDown: (event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                }
+                              }
+                            }}
+                          />
+                        </Stack>
                       ) : (
                         <TextField
                           label={field.label}
@@ -465,6 +505,18 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this.setState({ activeFieldId: fieldId, error: undefined });
   };
 
+  private _onIssueDateSelect = (fieldId: string, date: Date | null | undefined): void => {
+    const scrollX = window.scrollX || window.pageXOffset;
+    const scrollY = window.scrollY || window.pageYOffset;
+    this._onFieldValueChange(fieldId, date ? formatIssueDate(date) : '');
+    const restoreScroll = (): void => {
+      window.scrollTo(scrollX, scrollY);
+    };
+    restoreScroll();
+    window.requestAnimationFrame(restoreScroll);
+    window.setTimeout(restoreScroll, 0);
+  };
+
   private _onFieldValueChange = (fieldId: string, value: string): void => {
     this.setState((prev) => {
       const target = prev.fields.filter((field) => field.id === fieldId)[0];
@@ -525,6 +577,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     }
     if (isSenderField(label)) {
       return this._stripParentheses(value);
+    }
+    if (isIssueDateField(label)) {
+      return sanitizeIssueDate(value);
     }
     return value;
   };

@@ -163,7 +163,7 @@ function buildUserPrompt(
     'Subject: copy the full consecutive block after Subject: or Re:, including wrapped following lines. Omit the Subject: / Re: label itself. Stop before Dear Sir and before the letter body (I refer / We / Please). If there is no Subject: or Re:, copy the underlined heading in the middle of the letter.',
     'File No: file number',
     'Ref No: copy the value to the right of Our Ref: / Our Ref :. If there is no Our Ref, copy the value to the right of a standalone Ref: / Ref :. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
-    'Issue Date: issue or document date',
+    'Issue Date: the document date in dd/MM/yyyy, for example 03/09/2026.',
     'Attachment: attachments mentioned',
     'Scan: scan number or scan mark',
     'Remark: remarks or notes',
