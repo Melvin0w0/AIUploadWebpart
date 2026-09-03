@@ -60,6 +60,10 @@ export function extractReceiverAboveDearSir(page?: IOcrPageResult): string {
     return '';
   }
   try {
+    const fromAttn = extractAttnValue(page);
+    if (fromAttn) {
+      return fromAttn;
+    }
     const fromWords = addresseeBlockFromWords(page);
     if (fromWords) {
       return fromWords;
@@ -96,6 +100,146 @@ export function dearSirBandRegion(page?: IOcrPageResult): ISignatureRegion | und
     x1: Math.round(page.width * 0.96),
     y1: Math.min(page.height, Math.max(hit.y1 + Math.max(160, page.height * 0.42), page.height * 0.68))
   };
+}
+
+function extractAttnValue(page: IOcrPageResult): string {
+  const fromWords = attnFromWords(page);
+  if (fromWords) {
+    return fromWords;
+  }
+  return attnFromText(page.text || '');
+}
+
+function attnFromWords(page: IOcrPageResult): string {
+  const words = (page.words || []).slice().sort((left, right) => {
+    if (Math.abs(left.y0 - right.y0) > 8) {
+      return left.y0 - right.y0;
+    }
+    return left.x0 - right.x0;
+  });
+  for (let index = 0; index < words.length; index++) {
+    if (!isAttnLabelWord(words, index)) {
+      continue;
+    }
+    const value = valueAfterAttn(words, index);
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function isAttnLabelWord(words: IOcrWord[], index: number): boolean {
+  const key = wordKey(words[index].text || '');
+  if (isAttnKey(key)) {
+    return true;
+  }
+  if (key !== 'of') {
+    return false;
+  }
+  const prev = words[index - 1];
+  const prevKey = prev ? wordKey(prev.text || '') : '';
+  return prevKey === 'attention';
+}
+
+function isAttnKey(key: string): boolean {
+  return key === 'attn' ||
+    key === 'atin' ||
+    key === 'attm' ||
+    key === 'atln' ||
+    key === 'attention';
+}
+
+function valueAfterAttn(words: IOcrWord[], index: number): string {
+  let start = index + 1;
+  while (words[start]) {
+    const raw = (words[start].text || '').trim();
+    const key = wordKey(raw);
+    if (/^[:.\-]+$/.test(raw) || key === 'of' || key === 'to') {
+      start++;
+      continue;
+    }
+    break;
+  }
+
+  const label = words[index];
+  const lineMid = (label.y0 + label.y1) / 2;
+  const lineHeight = Math.max(label.y1 - label.y0, 1);
+  const collected: IOcrWord[] = [];
+  for (let cursor = start; cursor < words.length; cursor++) {
+    const word = words[cursor];
+    const wordMid = (word.y0 + word.y1) / 2;
+    if (Math.abs(wordMid - lineMid) > lineHeight * 0.85) {
+      break;
+    }
+    if (word.x0 < label.x1 - 6) {
+      continue;
+    }
+    if (isAttnValueStop(word.text || '')) {
+      break;
+    }
+    collected.push(word);
+  }
+  const sameLine = joinOcrWords(collected).replace(/^[:.\s-]+/, '').trim();
+  if (sameLine) {
+    return sameLine;
+  }
+
+  const below: IOcrWord[] = [];
+  for (let cursor = start; cursor < words.length; cursor++) {
+    const word = words[cursor];
+    if (word.y0 < label.y1 - lineHeight * 0.2) {
+      continue;
+    }
+    if (word.y0 > label.y1 + lineHeight * 1.8) {
+      break;
+    }
+    if (isAttnValueStop(word.text || '')) {
+      break;
+    }
+    below.push(word);
+  }
+  return joinOcrWords(below).replace(/^[:.\s-]+/, '').trim();
+}
+
+function isAttnValueStop(text: string): boolean {
+  const key = wordKey(text);
+  return key === 'date' ||
+    key === 'tel' ||
+    key === 'fax' ||
+    key === 'email' ||
+    key === 'dear' ||
+    key === 'our' ||
+    key === 'your' ||
+    key === 'page' ||
+    isAttnKey(key);
+}
+
+function attnFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  const pattern = /(?:for\s+the\s+)?att(?:n|ention|in|m)\s*(?:of)?\s*[:.\-]?\s*(.+)$/i;
+  for (let index = 0; index < lines.length; index++) {
+    const match = lines[index].match(pattern);
+    if (!match) {
+      continue;
+    }
+    const value = (match[1] || '')
+      .replace(/\b(date|tel|fax|email|dear|our\s+ref|your\s+ref)\b.*$/i, '')
+      .replace(/^[:.\s-]+/, '')
+      .trim();
+    if (value) {
+      return value;
+    }
+    const next = lines[index + 1];
+    if (next && !isSalutationLine(next) && !isAddressBlockStop(next) && !/^att(?:n|ention)/i.test(next)) {
+      return next.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return '';
+}
+
+function wordKey(text: string): string {
+  return (text || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function addresseeBlockFromText(text: string): string {

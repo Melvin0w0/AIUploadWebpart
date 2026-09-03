@@ -31,9 +31,16 @@ import {
 import {
   isProjectNumberField,
   isValidProjectNumber,
+  projectNumberFromYourRef,
   sanitizeProjectNumber
 } from '../constants/projectNumber';
-import { extractFieldValues, extractOurRefNo } from '../services/fieldExtractor';
+import {
+  canonicalSubProjectNumber,
+  isSubProjectNumberField,
+  SUB_PROJECT_NONE,
+  SUB_PROJECT_NUMBER_OPTIONS
+} from '../constants/subProjectNumber';
+import { extractFieldValues, extractOurRefNo, extractYourRefNo } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
 import { analyzeSignature, asPersonName, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
 import { SharePointUploadService } from '../services/SharePointUploadService';
@@ -281,6 +288,17 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
                         />
+                      ) : isSubProjectNumberField(field.label) ? (
+                        <Dropdown
+                          label={field.label}
+                          selectedKey={canonicalSubProjectNumber(field.value)}
+                          options={this._subProjectNumberOptions()}
+                          onChange={(_event, option) => this._onFieldValueChange(field.id, option ? String(option.key) : SUB_PROJECT_NONE)}
+                          onFocus={() => this._setActiveField(field.id)}
+                          required={isRequiredField(field.label)}
+                          errorMessage={this._requiredError(field, markRequired)}
+                          className={styles.fieldInput}
+                        />
                       ) : (
                         <TextField
                           label={field.label}
@@ -439,7 +457,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     return this._syncRegistrationFromName(names.map((label) => ({
       id: `field-${this._nextFieldId++}`,
       label,
-      value: valuesByLabel.get(label) || ''
+      value: valuesByLabel.get(label) || (isSubProjectNumberField(label) ? SUB_PROJECT_NONE : '')
     })));
   };
 
@@ -499,7 +517,28 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (isProjectNumberField(label)) {
       return sanitizeProjectNumber(value);
     }
+    if (isSubProjectNumberField(label)) {
+      return canonicalSubProjectNumber(value);
+    }
+    if (isSenderField(label) || isReceiverField(label)) {
+      return this._stripParentheses(value);
+    }
     return value;
+  };
+
+  private _stripParentheses = (value: string): string => {
+    let text = (value || '').trim();
+    let previous = '';
+    while (text !== previous) {
+      previous = text;
+      text = text
+        .replace(/^[\(\uFF08]\s*([\s\S]*?)\s*[\)\uFF09]$/, '$1')
+        .replace(/[\(\uFF08][^)\uFF09]*[\)\uFF09]/g, '')
+        .replace(/[\(\)\uFF08\uFF09]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    return text;
   };
 
   private _fillActiveField = (text: string): void => {
@@ -527,6 +566,13 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fields: this._syncRegistrationFromName(prev.fields.map((field) => field.id === targetId ? { ...field, value } : field)),
       activeFieldId: targetId,
       error: undefined
+    }));
+  };
+
+  private _subProjectNumberOptions = (): IDropdownOption[] => {
+    return SUB_PROJECT_NUMBER_OPTIONS.map((name) => ({
+      key: name,
+      text: name
     }));
   };
 
@@ -819,6 +865,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     let receiverName = '';
     let subjectText = '';
     let refNo = '';
+    let projectNumber = '';
     try {
       receiverName = extractReceiverAboveDearSir(firstPage);
     } catch {
@@ -833,6 +880,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       refNo = extractOurRefNo(pages || []);
     } catch {
       refNo = '';
+    }
+    try {
+      projectNumber = projectNumberFromYourRef(extractYourRefNo(pages || []));
+    } catch {
+      projectNumber = '';
     }
     let aiValues: { [label: string]: string } = {};
     let info: string | undefined;
@@ -876,6 +928,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           value = subjectText || aiSubject;
         } else if (isRefNoField(field.label)) {
           value = refNo || (aiValue || '').trim();
+        } else if (isProjectNumberField(field.label)) {
+          value = projectNumber || sanitizeProjectNumber(aiValue || '') || keywordValue || '';
         } else {
           value = (aiValue && aiValue.trim()) || keywordValue || '';
         }

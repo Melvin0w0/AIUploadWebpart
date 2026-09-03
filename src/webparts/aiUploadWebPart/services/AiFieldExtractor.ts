@@ -120,7 +120,7 @@ function buildRequest(
     messages: [
       {
         role: 'system',
-        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image, including logos and letterheads. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. For logos, use the official organization name. Sender is the printed person name below Yours sincerely or Yours faithfully and above the job title. Receiver is ONLY the first line of the consecutive lines immediately above Dear Sir. Subject is ONLY the underlined words after Dear Sir, not the rest of the sentence and not later underlined text. Ref No is the value to the right of Our Ref:. Do not invent values.'
+        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image, including logos and letterheads. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. For logos, use the official organization name. Sender is the printed person name below Yours sincerely or Yours faithfully and above the job title. Receiver is the value after Attn: if present; otherwise ONLY the first line of the consecutive lines immediately above Dear Sir. Subject is ONLY the underlined words after Dear Sir, not the rest of the sentence and not later underlined text. Ref No is the value to the right of Our Ref:. Project Number is the 8 digits before the slash in Your Ref. Do not invent values.'
       },
       {
         role: 'user',
@@ -151,11 +151,11 @@ function buildUserPrompt(
     'Name: document name or identifier. Registration Number must use this same value.',
     'Registration Number: always copy Name exactly. Do not invent a different value.',
     'Leading BL: leading business line. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water. Abbreviations such as ARC, BEG, ENV, GEO, ISD, LSM, MEP, PCM, PCC, TRA, UNC, UAP, WAT are also accepted. If an AECOM business-line logo or name is visible, select that listed value.',
-    'Project Number: up to 8 digits only. Copy digits only and omit letters, spaces, and extra characters.',
-    'Sub-Project Number: sub-project or task number',
+    'Project Number: the 8 digits immediately before the slash in Your Ref: / You Ref:. For example Your Ref: 12345678/ABC -> 12345678. Digits only.',
+    'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
     'Organization: company, consultant, contractor, or government department. Prefer the letterhead or logo at the top of the first page, even when OCR missed it. Use the official English name when it is clear, for example AECOM, Civil Engineering and Development Department, Highways Department, Drainage Services Department, Water Supplies Department.',
-    'Sender: below Yours sincerely / Yours faithfully / Yours truly, and above the job title (for example Chief Engineer, Director, Manager), copy the printed person name. If that name is in parentheses, copy the inside text only. Skip (signed), the job title, and the company name. OCR may read sincerely as sincerelt.',
-    'Receiver: immediately above Dear Sir there are several consecutive lines (name then address). Copy ONLY the first of those consecutive lines. Do not copy the later address lines, Dear Sir, Our Ref, or the date.',
+    'Sender: below Yours sincerely / Yours faithfully / Yours truly, and above the job title (for example Chief Engineer, Director, Manager), copy the printed person name. Do not include parentheses. If that name is in parentheses, copy the inside text only. Skip (signed), the job title, and the company name. OCR may read sincerely as sincerelt.',
+    'Receiver: if the page has Attn: / Attn : / Attention:, copy only the value after that label. If there is no Attn:, use the first of the consecutive lines immediately above Dear Sir. Do not include parentheses. Do not copy later address lines, Dear Sir, Our Ref, or the date.',
     'Subject: after Dear Sir, copy ONLY the words that sit on an underline. If the underline is under part of a sentence, copy only that underlined phrase, not the whole sentence. Do not use later underlined text further down the letter. You may omit a leading Re: or Subject: label.',
     'File No: file number',
     'Ref No: copy only the value to the right of Our Ref: / Our Ref :. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
@@ -171,11 +171,11 @@ function buildUserPrompt(
     ? [
       'Extract these fields from the first page of a scanned document.',
       'Images: full first page, letterhead/logo crop, the Dear Sir area for Receiver, the opening body for the underlined Subject, then the signature block if detected.',
-      'Read logos and letterheads for Organization. For Receiver, copy only the first of the consecutive lines immediately above Dear Sir. For Subject, copy only the underlined words after Dear Sir, not the surrounding sentence. For Sender, copy the person name below Yours sincerely / Yours faithfully and above the job title.'
+      'Read logos and letterheads for Organization. For Receiver, prefer the value after Attn: if present; otherwise copy only the first of the consecutive lines immediately above Dear Sir. For Subject, copy only the underlined words after Dear Sir, not the surrounding sentence. For Sender, copy the person name below Yours sincerely / Yours faithfully and above the job title.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Sender is the person name below Yours sincerely or Yours faithfully and above the job title. Receiver is only the first of the consecutive lines immediately above Dear Sir. Subject is only the underlined words after Dear Sir, not the whole sentence.'
+      'Sender is the person name below Yours sincerely or Yours faithfully and above the job title. Receiver is the value after Attn: if present, otherwise the first of the consecutive lines immediately above Dear Sir. Subject is only the underlined words after Dear Sir, not the whole sentence.'
     ];
 
   const parts = [
@@ -197,9 +197,9 @@ function buildUserPrompt(
     parts.push('', 'Look below Yours sincerely / Yours faithfully for the person name above the job title. That is Sender.');
   }
   if (receiverName && receiverName.trim()) {
-    parts.push('', 'Detected Receiver (first of the consecutive lines above Dear Sir):', receiverName.trim());
+    parts.push('', 'Detected Receiver:', receiverName.trim());
   } else {
-    parts.push('', 'Look at the consecutive lines immediately above Dear Sir. Receiver is only the first of those lines, not the address lines below it.');
+    parts.push('', 'If Attn: is present, Receiver is the value after Attn:. If not, Receiver is the first of the consecutive lines immediately above Dear Sir.');
   }
   if (subjectText && subjectText.trim()) {
     parts.push('', 'Detected Subject from the underlined words after Dear Sir:', subjectText.trim());

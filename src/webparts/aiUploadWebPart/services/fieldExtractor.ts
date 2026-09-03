@@ -1,4 +1,5 @@
 import { isReceiverField, isRefNoField, isSenderField, isSubjectField } from '../constants/defaultFormFields';
+import { isProjectNumberField, projectNumberFromYourRef } from '../constants/projectNumber';
 import { IOcrPageResult, IOcrWord } from './IPdfOcr';
 import { joinOcrWords } from './ocrSelection';
 
@@ -43,7 +44,7 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
   );
 
   fieldLabels.forEach((label) => {
-    if (isSenderField(label) || isReceiverField(label) || isSubjectField(label) || isRefNoField(label)) {
+    if (isSenderField(label) || isReceiverField(label) || isSubjectField(label) || isRefNoField(label) || isProjectNumberField(label)) {
       return;
     }
     const layoutValue = (fromLayout[label] || '').trim();
@@ -58,6 +59,18 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
 }
 
 export function extractOurRefNo(pages: IOcrPageResult[]): string {
+  return extractLabeledRef(pages, ourRefWordIndex, ourRefFromText);
+}
+
+export function extractYourRefNo(pages: IOcrPageResult[]): string {
+  return extractLabeledRef(pages, yourRefWordIndex, yourRefFromText);
+}
+
+function extractLabeledRef(
+  pages: IOcrPageResult[],
+  wordIndex: (words: IOcrWord[], index: number) => number,
+  fromText: (text: string) => string
+): string {
   const list = pages || [];
   for (let index = 0; index < list.length; index++) {
     const page = list[index];
@@ -65,35 +78,31 @@ export function extractOurRefNo(pages: IOcrPageResult[]): string {
       continue;
     }
     try {
-      const fromWords = ourRefOnPage(page);
-      if (fromWords) {
-        return fromWords;
+      const words = (page.words || []).slice().sort((left, right) => {
+        if (Math.abs(left.y0 - right.y0) > 8) {
+          return left.y0 - right.y0;
+        }
+        return left.x0 - right.x0;
+      });
+      for (let wordIndexCursor = 0; wordIndexCursor < words.length; wordIndexCursor++) {
+        const refIndex = wordIndex(words, wordIndexCursor);
+        if (refIndex < 0) {
+          continue;
+        }
+        const value = valueAfterRef(words, refIndex);
+        if (value) {
+          return value;
+        }
+      }
+      const fromPageText = fromText(page.text || '');
+      if (fromPageText) {
+        return fromPageText;
       }
     } catch {
       continue;
     }
   }
   return '';
-}
-
-function ourRefOnPage(page: IOcrPageResult): string {
-  const words = (page.words || []).slice().sort((left, right) => {
-    if (Math.abs(left.y0 - right.y0) > 8) {
-      return left.y0 - right.y0;
-    }
-    return left.x0 - right.x0;
-  });
-  for (let index = 0; index < words.length; index++) {
-    const refIndex = ourRefWordIndex(words, index);
-    if (refIndex < 0) {
-      continue;
-    }
-    const value = valueAfterRef(words, refIndex);
-    if (value) {
-      return value;
-    }
-  }
-  return ourRefFromText(page.text || '');
 }
 
 function ourRefWordIndex(words: IOcrWord[], index: number): number {
@@ -107,6 +116,22 @@ function ourRefWordIndex(words: IOcrWord[], index: number): number {
   const prev = words[index - 1];
   const prevKey = prev ? normalizeToken(prev.text || '') : '';
   if (prevKey === 'our' || prevKey === '0ur' || prevKey === 'ou') {
+    return index;
+  }
+  return -1;
+}
+
+function yourRefWordIndex(words: IOcrWord[], index: number): number {
+  const key = normalizeToken(words[index].text || '');
+  if (/^y(ou)?rr+e+fs?(no|number)?$/.test(key) || key === 'yourreference' || key === 'youref') {
+    return index;
+  }
+  if (!isRefWord(key)) {
+    return -1;
+  }
+  const prev = words[index - 1];
+  const prevKey = prev ? normalizeToken(prev.text || '') : '';
+  if (prevKey === 'your' || prevKey === 'you' || prevKey === 'yr' || prevKey === 'youf' || prevKey === 'yor') {
     return index;
   }
   return -1;
@@ -199,6 +224,25 @@ function ourRefFromText(text: string): string {
     }
     const value = (match[1] || '')
       .replace(/\b(your\s+r+e+f|date|tel|fax|email)\b.*$/i, '')
+      .replace(/^[:.\s-]+/, '')
+      .trim();
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function yourRefFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  const pattern = /\b(?:your?|yr)\s+r+e+f(?:erence)?(?:\s*no(?:\.)?)?\s*[:.\-]?\s*(.+)$/i;
+  for (let index = 0; index < lines.length; index++) {
+    const match = lines[index].match(pattern);
+    if (!match) {
+      continue;
+    }
+    const value = (match[1] || '')
+      .replace(/\b(our\s+r+e+f|date|tel|fax|email)\b.*$/i, '')
       .replace(/^[:.\s-]+/, '')
       .trim();
     if (value) {

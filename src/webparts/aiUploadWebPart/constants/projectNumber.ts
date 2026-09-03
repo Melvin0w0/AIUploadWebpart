@@ -12,3 +12,25 @@ export function sanitizeProjectNumber(value: string): string {
 export function isValidProjectNumber(value: string): boolean {
   return /^\d{1,8}$/.test((value || '').trim());
 }
+
+export function projectNumberFromYourRef(yourRef: string): string {
+  const source = (yourRef || '').trim();
+  if (!source) {
+    return '';
+  }
+  const slash = source.search(/[\/\\\uFF0F]/);
+  if (slash < 0) {
+    return '';
+  }
+  const before = source.substring(0, slash);
+  const atEnd = before.match(/(\d{8})\s*$/);
+  if (atEnd) {
+    return atEnd[1];
+  }
+  const digits = before.replace(/\D/g, '');
+  if (digits.length >= 8) {
+    return digits.substring(digits.length - 8);
+  }
+  return '';
+}
+
