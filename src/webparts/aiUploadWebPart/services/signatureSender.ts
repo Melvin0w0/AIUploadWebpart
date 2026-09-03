@@ -87,6 +87,10 @@ export function extractOrganizationAboveAddressee(page?: IOcrPageResult): string
     return '';
   }
   try {
+    const fromAttn = organizationAboveAttn(page);
+    if (fromAttn) {
+      return fromAttn;
+    }
     const fromWords = consecutiveAddresseeLines(page)
       .map((line) => completeAddresseeLine(page, line))
       .filter((line) => line.length > 0);
@@ -98,6 +102,100 @@ export function extractOrganizationAboveAddressee(page?: IOcrPageResult): string
   } catch {
     return '';
   }
+}
+
+function organizationAboveAttn(page: IOcrPageResult): string {
+  const fromWords = firstLineAboveAttnFromWords(page);
+  if (fromWords) {
+    return fromWords;
+  }
+  return firstLineAboveAttnFromText(page.text || '');
+}
+
+function isAttnLine(line: string): boolean {
+  return /^(?:for\s+the\s+)?(?:att(?:n|ention)|atin|attm|atln)\b/i.test((line || '').replace(/\s+/g, ' ').trim());
+}
+
+function firstLineAboveAttnFromWords(page: IOcrPageResult): string {
+  const lines = groupWordsIntoLines(page.words || []);
+  if (lines.length === 0) {
+    return '';
+  }
+  const dear = findSalutationHit(page.words || []);
+  const attnIndex = findAttnLineIndex(lines, dear ? dear.y0 : -1);
+  if (attnIndex < 0) {
+    return '';
+  }
+  const above: string[] = [];
+  let nextBottom = lines[attnIndex].y0;
+  for (let index = attnIndex - 1; index >= 0 && above.length < 4; index--) {
+    const line = lines[index];
+    const text = completeAddresseeLine(page, line);
+    if (!text || isAttnLine(text) || isSalutationLine(text)) {
+      continue;
+    }
+    if (isAddressBlockStop(text)) {
+      break;
+    }
+    const lineHeight = Math.max(12, line.y1 - line.y0);
+    if (nextBottom - line.y1 > lineHeight * 2.8) {
+      break;
+    }
+    above.unshift(text);
+    nextBottom = line.y0;
+  }
+  return above.length > 0 ? above[0] : '';
+}
+
+function firstLineAboveAttnFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => (line || '').replace(/\s+/g, ' ').trim());
+  let attnIndex = -1;
+  for (let index = 0; index < lines.length; index++) {
+    if (isAttnLine(lines[index])) {
+      attnIndex = index;
+      break;
+    }
+  }
+  if (attnIndex < 0) {
+    return '';
+  }
+  const above: string[] = [];
+  for (let index = attnIndex - 1; index >= 0 && above.length < 4; index--) {
+    const line = lines[index];
+    if (!line) {
+      if (above.length > 0) {
+        break;
+      }
+      continue;
+    }
+    if (isAttnLine(line) || isSalutationLine(line)) {
+      continue;
+    }
+    if (isAddressBlockStop(line)) {
+      break;
+    }
+    above.unshift(line);
+  }
+  return above.length > 0 ? above[0] : '';
+}
+
+function findAttnLineIndex(lines: { text: string; y0: number; y1: number }[], dearY: number): number {
+  const hits: number[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (isAttnLine(lines[index].text)) {
+      hits.push(index);
+    }
+  }
+  if (hits.length === 0) {
+    return -1;
+  }
+  if (dearY >= 0) {
+    const aboveDear = hits.filter((index) => lines[index].y1 <= dearY + 6);
+    if (aboveDear.length > 0) {
+      return aboveDear[aboveDear.length - 1];
+    }
+  }
+  return hits[0];
 }
 
 function organizationFromLines(lines: string[]): string {
