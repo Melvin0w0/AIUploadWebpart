@@ -49,6 +49,7 @@ import {
 import {
   canonicalYesNo,
   isYesNoChoiceField,
+  NO_VALUE,
   YES_NO_OPTIONS,
   YES_VALUE
 } from '../constants/yesNo';
@@ -61,6 +62,15 @@ import {
   fileNameFromFields,
   resolveUploadDestination
 } from '../services/uploadDestination';
+import {
+  rememberFieldValue,
+  rememberRecord,
+  isHistoryTextField,
+  loadFieldHistory,
+  saveFieldHistory,
+  suggestionsFor,
+  IFieldHistory
+} from '../services/fieldHistory';
 
 interface IFormField {
   id: string;
@@ -85,6 +95,8 @@ interface IAiUploadState {
   isUploading: boolean;
   uploadStatus: string | undefined;
   showRequiredErrors: boolean;
+  history: IFieldHistory;
+  historyFieldId: string | undefined;
 }
 
 export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadState> {
@@ -95,6 +107,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _calendarObserver: MutationObserver | undefined;
   private _originalFocus: ((this: HTMLElement, options?: FocusOptions) => void) | undefined;
   private _focusPatchTimer: number | undefined;
+  private _historyCloseTimer: number | undefined;
 
   public constructor(props: IAiUploadProps) {
     super(props);
@@ -119,7 +132,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       warning: undefined,
       isUploading: false,
       uploadStatus: undefined,
-      showRequiredErrors: false
+      showRequiredErrors: false,
+      history: loadFieldHistory(),
+      historyFieldId: undefined
     };
   }
 
@@ -145,6 +160,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     document.removeEventListener('submit', this._onDocumentSubmitCapture, true);
     this._stopCalendarObserver();
     this._disablePreventScrollFocus();
+    if (this._historyCloseTimer !== undefined) {
+      window.clearTimeout(this._historyCloseTimer);
+    }
     this._revokePageUrls(this.state.pages);
   }
 
@@ -166,7 +184,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       warning,
       isUploading,
       uploadStatus,
-      showRequiredErrors
+      showRequiredErrors,
+      history,
+      historyFieldId
     } = this.state;
     const busy = isProcessing || isUploading;
     const converted = pages.length > 0 && !isProcessing;
@@ -271,11 +291,33 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             </div>
             <div className={styles.fieldsBody}>
               <p className={styles.hint}>{strings.HighlightHint}</p>
+              {history.records.length > 0 && (
+                <div className={styles.recentBar}>
+                  <span className={styles.recentLabel}>{strings.RecentRecordsLabel}</span>
+                  <div className={styles.recentChips}>
+                    {history.records.map((record) => (
+                      <button
+                        key={record.id}
+                        type="button"
+                        className={styles.recentChip}
+                        title={record.summary}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          this._restoreRecord(record);
+                        }}
+                      >
+                        {record.summary}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className={styles.fieldGroup}>
                 {fields.map((field) => (
                   <div
                     key={field.id}
-                    className={`${styles.fieldCard} ${field.id === activeFieldId ? styles.fieldCardActive : ''} ${this._isMissingRequired(field, markRequired) ? styles.fieldCardMissing : ''}`}
+                    className={`${styles.fieldCard} ${field.id === activeFieldId ? styles.fieldCardActive : ''} ${this._isMissingRequired(field, markRequired) ? styles.fieldCardMissing : ''} ${field.id === historyFieldId ? styles.fieldCardHistoryOpen : ''}`}
                     onClick={() => this._setActiveField(field.id)}
                   >
                     {isYesNoChoiceField(field.label) ? (
@@ -309,6 +351,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                         <div className={styles.fieldInput}>
                           <Label>{ISSUE_DATE_DISPLAY_LABEL}</Label>
                           <DatePicker
+                            className={styles.datePicker}
                             value={parseIssueDate(field.value)}
                             onSelectDate={(date) => this._onIssueDateSelect(field.id, date)}
                             formatDate={(date) => date ? formatIssueDate(date) : ''}
@@ -322,13 +365,31 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                             ariaLabel={ISSUE_DATE_DISPLAY_LABEL}
                             isMonthPickerVisible={false}
                             calendarProps={{
-                              showGoToToday: false
+                              showGoToToday: false,
+                              styles: {
+                                root: {
+                                  width: 280
+                                }
+                              }
                             }}
                             calloutProps={{
+                              className: styles.datePickerCallout,
+                              gapSpace: 8,
+                              isBeakVisible: false,
                               setInitialFocus: false,
                               preventDismissOnResize: true,
                               onMouseDown: (event) => this._patchCalendarButtons(event.currentTarget),
                               onClick: (event) => event.preventDefault(),
+                              styles: {
+                                root: {
+                                  borderRadius: 16,
+                                  overflow: 'hidden'
+                                },
+                                calloutMain: {
+                                  borderRadius: 16,
+                                  overflow: 'hidden'
+                                }
+                              },
                               layerProps: {
                                 onLayerDidMount: this._onCalendarLayerMount,
                                 onLayerWillUnmount: this._onCalendarLayerUnmount
@@ -348,11 +409,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           />
                         </div>
                       ) : (
+                        <div className={styles.historyField}>
                         <TextField
                           label={field.label}
                           value={field.value}
                           onChange={(_event, newValue) => this._onFieldValueChange(field.id, newValue || '')}
-                          onFocus={() => this._setActiveField(field.id)}
+                          onFocus={() => {
+                            this._setActiveField(field.id);
+                            this._openHistory(field.id);
+                          }}
+                          onBlur={() => this._onHistoryFieldBlur(field)}
                           placeholder={
                             isNameField(field.label)
                               ? strings.NamePlaceholder
@@ -378,6 +444,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           className={styles.fieldInput}
                           borderless={true}
                         />
+                        {this._renderFieldHistory(field)}
+                        </div>
                       )}
                       {!isRegistrationNumberField(field.label) && (
                       <IconButton
@@ -479,6 +547,116 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     );
   }
 
+  private _pulseYesNo = (target: HTMLElement): void => {
+    const group = target.closest(`.${styles.segmented}`) as HTMLElement | null;
+    if (!group || typeof group.animate !== 'function') {
+      return;
+    }
+    group.animate(
+      [
+        { transform: 'scale(1)' },
+        { transform: 'scale(0.96)', offset: 0.32 },
+        { transform: 'scale(1)' }
+      ],
+      { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+    );
+  };
+
+  private _persistHistory = (history: IFieldHistory): IFieldHistory => {
+    saveFieldHistory(history);
+    return history;
+  };
+
+  private _openHistory = (fieldId: string): void => {
+    if (this._historyCloseTimer !== undefined) {
+      window.clearTimeout(this._historyCloseTimer);
+      this._historyCloseTimer = undefined;
+    }
+    this.setState({ historyFieldId: fieldId });
+  };
+
+  private _closeHistory = (): void => {
+    this.setState({ historyFieldId: undefined });
+  };
+
+  private _onHistoryFieldBlur = (field: IFormField): void => {
+    if (isHistoryTextField(field.label)) {
+      const history = this._persistHistory(rememberFieldValue(this.state.history, field.label, field.value));
+      this.setState({ history });
+    }
+    this._historyCloseTimer = window.setTimeout(() => {
+      this._closeHistory();
+    }, 160);
+  };
+
+  private _applyHistoryValue = (field: IFormField, value: string): void => {
+    if (this._historyCloseTimer !== undefined) {
+      window.clearTimeout(this._historyCloseTimer);
+      this._historyCloseTimer = undefined;
+    }
+    this._onFieldValueChange(field.id, value);
+    this.setState({ historyFieldId: undefined });
+  };
+
+  private _restoreRecord = (record: { fields: { label: string; value: string }[] }): void => {
+    const keepName = !!this.state.file;
+    this.setState((prev) => {
+      const byLabel = new Map<string, string>();
+      record.fields.forEach((item) => {
+        byLabel.set(item.label.toLowerCase(), item.value);
+      });
+      const fields = prev.fields.map((field) => {
+        if (keepName && (isNameField(field.label) || isRegistrationNumberField(field.label))) {
+          return field;
+        }
+        const saved = byLabel.get(field.label.toLowerCase());
+        if (saved === undefined) {
+          return field;
+        }
+        return {
+          ...field,
+          value: this._normalizeFieldValue(field.label, saved)
+        };
+      });
+      return {
+        fields: this._syncRegistrationFromName(fields),
+        historyFieldId: undefined,
+        showRequiredErrors: false,
+        error: undefined
+      };
+    });
+  };
+
+  private _renderFieldHistory = (field: IFormField): React.ReactNode => {
+    if (field.id !== this.state.historyFieldId || !isHistoryTextField(field.label)) {
+      return undefined;
+    }
+    const suggestions = suggestionsFor(this.state.history, field.label, field.value);
+    if (suggestions.length === 0) {
+      return undefined;
+    }
+    return (
+      <ul className={styles.historyList} role="listbox" aria-label={strings.RecentValuesLabel}>
+        <li className={styles.historyCaption}>{strings.RecentValuesLabel}</li>
+        {suggestions.map((value) => (
+          <li key={value}>
+            <button
+              type="button"
+              className={styles.historyItem}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                this._applyHistoryValue(field, value);
+              }}
+            >
+              {value}
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
   private _renderBanner = (
     kind: 'error' | 'info' | 'success' | 'warning',
     message: React.ReactNode,
@@ -510,13 +688,19 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
   private _renderYesNo = (field: IFormField): React.ReactNode => {
     const selected = canonicalYesNo(field.value) || YES_VALUE;
+    const isNo = selected === NO_VALUE;
     return (
       <div className={styles.yesNoRow}>
         <span className={styles.yesNoLabel}>
           {field.label}
           {isRequiredField(field.label) ? <span className={styles.required}> *</span> : undefined}
         </span>
-        <div className={styles.segmented} role="radiogroup" aria-label={field.label}>
+        <div
+          className={`${styles.segmented} ${isNo ? styles.segmentedNo : ''}`}
+          role="radiogroup"
+          aria-label={field.label}
+        >
+          <span className={styles.segmentThumb} aria-hidden={true} />
           {YES_NO_OPTIONS.map((name) => (
             <button
               key={name}
@@ -527,8 +711,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                this._pulseYesNo(event.currentTarget);
                 this._setActiveField(field.id);
-                this._onFieldValueChange(field.id, name);
+                this._onFieldValueChange(field.id, selected === YES_VALUE ? NO_VALUE : YES_VALUE);
               }}
             >
               {name}
@@ -999,7 +1184,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         uploadStatus: undefined,
         success: locFormat(strings.UploadSucceeded, 'Uploaded {0}.', result.fileName),
         successUrl: result.fileUrl,
-        warning: result.metadataError || undefined
+        warning: result.metadataError || undefined,
+        history: this._persistHistory(rememberRecord(this.state.history, fields))
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : strings.UploadFailed;

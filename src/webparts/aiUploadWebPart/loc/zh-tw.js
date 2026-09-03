@@ -91,7 +91,9 @@ define([], function () {
     LanguageTraditionalChinese: 'Traditional Chinese',
     LanguageSimplifiedChinese: 'Simplified Chinese',
     LanguageEnglishTraditionalChinese: 'English + Traditional Chinese',
-    LanguageEnglishSimplifiedChinese: 'English + Simplified Chinese'
+    LanguageEnglishSimplifiedChinese: 'English + Simplified Chinese',
+    RecentRecordsLabel: 'Recent records',
+    RecentValuesLabel: 'Recent'
     // loc bundle
   };
 });

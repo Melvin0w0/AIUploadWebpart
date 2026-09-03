@@ -432,12 +432,14 @@
 }
 
 .fieldCard {
+  position: relative;
   padding: 10px 12px 12px;
   border: none;
   border-bottom: 1px solid var(--apple-separator);
   border-radius: 0;
   background: transparent;
   cursor: pointer;
+  transition: background 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .fieldCard:last-child {
@@ -488,19 +490,46 @@
   color: var(--apple-red);
 }
 
+.fieldCardHistoryOpen {
+  z-index: 4;
+}
+
 .segmented {
-  display: inline-flex;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
   padding: 2px;
   background: var(--apple-fill);
   border-radius: 9px;
   flex-shrink: 0;
+  overflow: visible;
+}
+
+.segmentThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 2);
+  height: calc(100% - 4px);
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+  transform: translateX(0);
+  transition: transform 340ms cubic-bezier(0.32, 0.72, 0, 1);
+  pointer-events: none;
+}
+
+.segmentedNo .segmentThumb {
+  transform: translateX(100%);
 }
 
 .segment {
   appearance: none;
+  position: relative;
+  z-index: 1;
   border: none;
   background: transparent;
-  color: var(--apple-text);
+  color: var(--apple-secondary);
   padding: 6px 14px;
   min-width: 52px;
   border-radius: 7px;
@@ -508,11 +537,201 @@
   font-weight: 590;
   line-height: 1.2;
   cursor: pointer;
+  transition: color 220ms ease;
 }
 
 .segmentActive {
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+  color: var(--apple-text);
+  background: transparent;
+  box-shadow: none;
+}
+
+.historyField {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.historyList {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 6;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  max-height: 196px;
+  overflow: auto;
+  animation: historyIn 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.historyCaption {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  font-weight: 590;
+  color: var(--apple-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.historyItem {
+  appearance: none;
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--apple-text);
+  cursor: pointer;
+}
+
+.historyItem:hover {
+  background: var(--apple-fill);
+}
+
+.recentBar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px 8px;
+}
+
+.recentLabel {
+  font-size: 12px;
+  font-weight: 590;
+  color: var(--apple-tertiary);
+}
+
+.recentChips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.recentChip {
+  appearance: none;
+  flex: 0 0 auto;
+  max-width: 240px;
+  border: none;
+  background: var(--apple-fill);
+  color: var(--apple-text);
+  padding: 8px 12px;
+  border-radius: 980px;
+  font-size: 13px;
+  font-weight: 510;
+  line-height: 1.3;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms ease;
+}
+
+.recentChip:hover {
+  background: var(--apple-fill-pressed);
+  transform: translateY(-1px);
+}
+
+@keyframes historyIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.datePicker {
+  :global(.ms-TextField-fieldGroup) {
+    transition: background 180ms ease, box-shadow 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  :global(.ms-TextField-fieldGroup:hover),
+  :global(.ms-TextField-fieldGroup:focus-within) {
+    background: #ebebf0;
+  }
+}
+
+.datePickerCallout {
+  border-radius: 16px !important;
+  overflow: hidden;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.04) !important;
+  animation: datePickerIn 240ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  :global {
+    .ms-Callout-main {
+      border-radius: 16px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .ms-Calendar {
+      padding: 10px 8px 12px;
+    }
+
+    .ms-Calendar-header {
+      padding: 4px 6px 8px;
+    }
+
+    .ms-Calendar-monthAndYear,
+    .ms-Calendar-month,
+    .ms-Calendar-year {
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .ms-Calendar-day,
+    .ms-Calendar-dayButton,
+    .ms-Calendar-day--default,
+    button {
+      border-radius: 50%;
+      transition: background 160ms ease, color 160ms ease, transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    button:hover {
+      background: #f2f2f7 !important;
+    }
+
+    button:active {
+      transform: scale(0.9);
+    }
+  }
+}
+
+@keyframes datePickerIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fieldCard,
+  .segmentThumb,
+  .segment,
+  .recentChip,
+  .datePicker :global(.ms-TextField-fieldGroup) {
+    transition: none;
+  }
+
+  .historyList,
+  .datePickerCallout {
+    animation: none;
+  }
 }
 
 .clearFieldBtn {

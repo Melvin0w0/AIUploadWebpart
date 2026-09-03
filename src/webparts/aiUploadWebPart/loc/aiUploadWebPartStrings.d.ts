@@ -91,6 +91,8 @@ declare interface IAiUploadWebPartStrings {
   LanguageSimplifiedChinese: string;
   LanguageEnglishTraditionalChinese: string;
   LanguageEnglishSimplifiedChinese: string;
+  RecentRecordsLabel: string;
+  RecentValuesLabel: string;
 }
 
 declare module 'AiUploadWebPartStrings' {
