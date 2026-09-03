@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { IOcrPageResult } from '../services/IPdfOcr';
-import { joinOcrWords, wordIndexAtPoint, wordsInRect } from '../services/ocrSelection';
+import { joinOcrWords, wordIndexAtPoint, wordsInTextRange } from '../services/ocrSelection';
 import styles from './AiUpload.module.scss';
 
 export interface IPdfHighlightViewerProps {
@@ -21,10 +21,16 @@ interface IPdfHighlightViewerState {
 
 export default class PdfHighlightViewer extends React.Component<IPdfHighlightViewerProps, IPdfHighlightViewerState> {
   private _imageRef: React.RefObject<HTMLImageElement>;
+  private _dragging: boolean;
+  private _startX: number;
+  private _startY: number;
 
   public constructor(props: IPdfHighlightViewerProps) {
     super(props);
     this._imageRef = React.createRef<HTMLImageElement>();
+    this._dragging = false;
+    this._startX = 0;
+    this._startY = 0;
     this.state = {
       displayWidth: 0,
       displayHeight: 0,
@@ -38,11 +44,13 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
 
   public componentDidMount(): void {
     window.addEventListener('resize', this._syncSize);
+    window.addEventListener('mousemove', this._onWindowMouseMove);
     window.addEventListener('mouseup', this._onWindowMouseUp);
   }
 
   public componentWillUnmount(): void {
     window.removeEventListener('resize', this._syncSize);
+    window.removeEventListener('mousemove', this._onWindowMouseMove);
     window.removeEventListener('mouseup', this._onWindowMouseUp);
   }
 
@@ -57,17 +65,15 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
     const { displayWidth, displayHeight, isDragging, startX, startY, currentX, currentY } = this.state;
     const words = page.words || [];
     const scale = page.width > 0 && displayWidth > 0 ? displayWidth / page.width : 1;
-    const dragX = Math.min(startX, currentX) * scale;
-    const dragY = Math.min(startY, currentY) * scale;
-    const dragWidth = Math.abs(currentX - startX) * scale;
-    const dragHeight = Math.abs(currentY - startY) * scale;
+    const highlightIndexes = isDragging
+      ? wordsInTextRange(words, startX, startY, currentX, currentY)
+      : selectedIndexes;
 
     return (
       <div className={styles.pdfViewer}>
         <div
           className={styles.pageStage}
           onMouseDown={this._onMouseDown}
-          onMouseMove={this._onMouseMove}
         >
           <img
             ref={this._imageRef}
@@ -84,7 +90,7 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
               height={displayHeight}
             >
               {words.map((word, index) => {
-                const isSelected = selectedIndexes.indexOf(index) >= 0;
+                const isSelected = highlightIndexes.indexOf(index) >= 0;
                 return (
                   <rect
                     key={`${word.x0}-${word.y0}-${index}`}
@@ -96,15 +102,6 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                   />
                 );
               })}
-              {isDragging && dragWidth > 2 && dragHeight > 2 && (
-                <rect
-                  x={dragX}
-                  y={dragY}
-                  width={dragWidth}
-                  height={dragHeight}
-                  className={styles.dragRect}
-                />
-              )}
             </svg>
           )}
         </div>
@@ -132,9 +129,11 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
     const bounds = image.getBoundingClientRect();
     const scaleX = page.width / bounds.width;
     const scaleY = page.height / bounds.height;
+    const x = (event.clientX - bounds.left) * scaleX;
+    const y = (event.clientY - bounds.top) * scaleY;
     return {
-      x: (event.clientX - bounds.left) * scaleX,
-      y: (event.clientY - bounds.top) * scaleY
+      x: Math.max(0, Math.min(page.width, x)),
+      y: Math.max(0, Math.min(page.height, y))
     };
   };
 
@@ -147,6 +146,9 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
       return;
     }
     event.preventDefault();
+    this._dragging = true;
+    this._startX = point.x;
+    this._startY = point.y;
     this.setState({
       isDragging: true,
       startX: point.x,
@@ -156,8 +158,8 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
     });
   };
 
-  private _onMouseMove = (event: React.MouseEvent<HTMLDivElement>): void => {
-    if (!this.state.isDragging) {
+  private _onWindowMouseMove = (event: MouseEvent): void => {
+    if (!this._dragging) {
       return;
     }
     const point = this._toImagePoint(event);
@@ -171,9 +173,10 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
   };
 
   private _onWindowMouseUp = (event: MouseEvent): void => {
-    if (!this.state.isDragging) {
+    if (!this._dragging) {
       return;
     }
+    this._dragging = false;
     const point = this._toImagePoint(event) || {
       x: this.state.currentX,
       y: this.state.currentY
@@ -183,7 +186,8 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
 
   private _finishSelection = (endX: number, endY: number): void => {
     const { page, onSelectText } = this.props;
-    const { startX, startY } = this.state;
+    const startX = this._startX;
+    const startY = this._startY;
     const words = page.words || [];
     const movement = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
 
@@ -192,12 +196,7 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
       const wordIndex = wordIndexAtPoint(words, endX, endY);
       indexes = wordIndex >= 0 ? [wordIndex] : [];
     } else {
-      indexes = wordsInRect(words, {
-        x0: startX,
-        y0: startY,
-        x1: endX,
-        y1: endY
-      });
+      indexes = wordsInTextRange(words, startX, startY, endX, endY);
     }
 
     this.setState({
