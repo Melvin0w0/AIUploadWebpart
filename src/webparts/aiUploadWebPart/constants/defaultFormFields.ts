@@ -6,6 +6,7 @@ export const RECEIVER_LABEL: string = 'Receiver';
 
 export const SUBJECT_LABEL: string = 'Subject';
 export const REF_NO_LABEL: string = 'Ref No';
+export const ORGANIZATION_LABEL: string = 'Organization';
 
 export function isNameField(label: string): boolean {
   return (label || '').trim().toLowerCase() === NAME_LABEL.toLowerCase();
@@ -29,6 +30,10 @@ export function isSubjectField(label: string): boolean {
 
 export function isRefNoField(label: string): boolean {
   return (label || '').trim().toLowerCase() === REF_NO_LABEL.toLowerCase();
+}
+
+export function isOrganizationField(label: string): boolean {
+  return (label || '').trim().toLowerCase() === ORGANIZATION_LABEL.toLowerCase();
 }
 
 export const DEFAULT_FORM_FIELDS: string[] = [

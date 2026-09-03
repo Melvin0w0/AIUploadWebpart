@@ -18,7 +18,7 @@ export function projectNumberFromYourRef(yourRef: string): string {
   if (!source) {
     return '';
   }
-  const slash = source.search(/[\/\\\uFF0F]/);
+  const slash = source.search(/[/\\\uFF0F]/);
   if (slash < 0) {
     return '';
   }

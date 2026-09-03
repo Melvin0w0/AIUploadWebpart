@@ -20,7 +20,8 @@ export async function extractFieldsWithAi(
   signature?: ISignatureAnalysis,
   receiverName?: string,
   subjectText?: string,
-  refNo?: string
+  refNo?: string,
+  organization?: string
 ): Promise<{ [label: string]: string }> {
   const text = (ocrText || '').trim();
   if (fieldLabels.length === 0) {
@@ -34,13 +35,13 @@ export async function extractFieldsWithAi(
   }
 
   try {
-    return await requestExtraction(clipped, fieldLabels, config, images, signature, receiverName, subjectText, refNo);
+    return await requestExtraction(clipped, fieldLabels, config, images, signature, receiverName, subjectText, refNo, organization);
   } catch {
     if (images.length === 0) {
       return {};
     }
     try {
-      return await requestExtraction(clipped, fieldLabels, config, [], signature, receiverName, subjectText, refNo);
+      return await requestExtraction(clipped, fieldLabels, config, [], signature, receiverName, subjectText, refNo, organization);
     } catch {
       return {};
     }
@@ -55,9 +56,10 @@ async function requestExtraction(
   signature?: ISignatureAnalysis,
   receiverName?: string,
   subjectText?: string,
-  refNo?: string
+  refNo?: string,
+  organization?: string
 ): Promise<{ [label: string]: string }> {
-  const payload = buildRequest(ocrText, fieldLabels, config, images, signature, receiverName, subjectText, refNo);
+  const payload = buildRequest(ocrText, fieldLabels, config, images, signature, receiverName, subjectText, refNo, organization);
   let response: Response;
   try {
     response = await fetch(payload.url, {
@@ -88,7 +90,8 @@ function buildRequest(
   signature?: ISignatureAnalysis,
   receiverName?: string,
   subjectText?: string,
-  refNo?: string
+  refNo?: string,
+  organization?: string
 ): { url: string; headers: { [key: string]: string }; body: string } {
   const endpoint = config.endpoint.replace(/\/+$/, '');
   const isOpenAi = endpoint.indexOf('api.openai.com') >= 0;
@@ -106,7 +109,7 @@ function buildRequest(
     headers['api-key'] = config.apiKey.trim();
   }
 
-  const prompt = buildUserPrompt(ocrText, fieldLabels, images.length > 0, signature, receiverName, subjectText, refNo);
+  const prompt = buildUserPrompt(ocrText, fieldLabels, images.length > 0, signature, receiverName, subjectText, refNo, organization);
   const userContent: string | IChatPart[] = images.length > 0
     ? buildImagePromptParts(prompt, images)
     : prompt;
@@ -120,7 +123,7 @@ function buildRequest(
     messages: [
       {
         role: 'system',
-        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image, including logos and letterheads. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. For logos, use the official organization name. Sender is the printed person name below Yours sincerely or Yours faithfully and above the job title. Receiver is the value after Attn: if present; otherwise ONLY the first line of the consecutive lines immediately above Dear Sir. Subject is ONLY the underlined words after Dear Sir, not the rest of the sentence and not later underlined text. Ref No is the value to the right of Our Ref:. Project Number is the 8 digits before the slash in Your Ref. Do not invent values.'
+        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. Organization is ONLY the first complete line of the consecutive block immediately above Dear Sir, starting at the first line that begins with an English letter. Do not include the second line or later address lines. Sender is the printed person name below Yours sincerely or Yours faithfully and above the job title. If two names appear there, use the upper name, never the job title such as Chief Engineer or Director. Receiver is the value after Attn: if present; otherwise ONLY the first line of the consecutive lines immediately above Dear Sir. Do not include titles such as Mr., Ms., Mrs., Miss, Dr., or Ir. Subject is the full consecutive block after Subject: or Re:, including wrapped following lines, omitting the label itself. If there is no Subject: or Re:, copy the underlined heading in the middle of the letter. Do not copy the letter body after that block. Ref No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits before the slash in Your Ref. Do not invent values.'
       },
       {
         role: 'user',
@@ -145,7 +148,8 @@ function buildUserPrompt(
   signature?: ISignatureAnalysis,
   receiverName?: string,
   subjectText?: string,
-  refNo?: string
+  refNo?: string,
+  organization?: string
 ): string {
   const fieldHelp = [
     'Name: document name or identifier. Registration Number must use this same value.',
@@ -153,12 +157,12 @@ function buildUserPrompt(
     'Leading BL: leading business line. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water. Abbreviations such as ARC, BEG, ENV, GEO, ISD, LSM, MEP, PCM, PCC, TRA, UNC, UAP, WAT are also accepted. If an AECOM business-line logo or name is visible, select that listed value.',
     'Project Number: the 8 digits immediately before the slash in Your Ref: / You Ref:. For example Your Ref: 12345678/ABC -> 12345678. Digits only.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
-    'Organization: company, consultant, contractor, or government department. Prefer the letterhead or logo at the top of the first page, even when OCR missed it. Use the official English name when it is clear, for example AECOM, Civil Engineering and Development Department, Highways Department, Drainage Services Department, Water Supplies Department.',
-    'Sender: below Yours sincerely / Yours faithfully / Yours truly, and above the job title (for example Chief Engineer, Director, Manager), copy the printed person name. Do not include parentheses. If that name is in parentheses, copy the inside text only. Skip (signed), the job title, and the company name. OCR may read sincerely as sincerelt.',
-    'Receiver: if the page has Attn: / Attn : / Attention:, copy only the value after that label. If there is no Attn:, use the first of the consecutive lines immediately above Dear Sir. Do not include parentheses. Do not copy later address lines, Dear Sir, Our Ref, or the date.',
-    'Subject: after Dear Sir, copy ONLY the words that sit on an underline. If the underline is under part of a sentence, copy only that underlined phrase, not the whole sentence. Do not use later underlined text further down the letter. You may omit a leading Re: or Subject: label.',
+    'Organization: copy ONLY the first complete line of the consecutive block immediately above Dear Sir / Dear Sirs. Start at the first line that begins with an English letter. Skip Attn: and lines that start with a symbol. Do not include the second line, later address lines, Dear Sir, or the letterhead at the top of the page.',
+    'Sender: below Yours sincerely / Yours faithfully / Yours truly, and above the job title (for example Chief Engineer, Director, Manager), copy the printed person name. If two names appear in that block, copy the upper name, not the job title. Do not copy Chief Engineer, Director, Manager, or similar titles. Do not include parentheses. If that name is in parentheses, copy the inside text only. Skip (signed), the job title, and the company name. OCR may read sincerely as sincerelt.',
+    'Receiver: if the page has Attn: / Attn : / Attention:, copy only the value after that label. If there is no Attn:, use the first of the consecutive lines immediately above Dear Sir. Do not include parentheses. Do not include titles such as Mr., Ms., Mrs., Miss, Dr., or Ir. Do not copy later address lines, Dear Sir, Our Ref, or the date.',
+    'Subject: copy the full consecutive block after Subject: or Re:, including wrapped following lines. Omit the Subject: / Re: label itself. Stop before Dear Sir and before the letter body (I refer / We / Please). If there is no Subject: or Re:, copy the underlined heading in the middle of the letter.',
     'File No: file number',
-    'Ref No: copy only the value to the right of Our Ref: / Our Ref :. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
+    'Ref No: copy the value to the right of Our Ref: / Our Ref :. If there is no Our Ref, copy the value to the right of a standalone Ref: / Ref :. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
     'Issue Date: issue or document date',
     'Attachment: attachments mentioned',
     'Scan: scan number or scan mark',
@@ -170,12 +174,12 @@ function buildUserPrompt(
   const sourceLines = hasImage
     ? [
       'Extract these fields from the first page of a scanned document.',
-      'Images: full first page, letterhead/logo crop, the Dear Sir area for Receiver, the opening body for the underlined Subject, then the signature block if detected.',
-      'Read logos and letterheads for Organization. For Receiver, prefer the value after Attn: if present; otherwise copy only the first of the consecutive lines immediately above Dear Sir. For Subject, copy only the underlined words after Dear Sir, not the surrounding sentence. For Sender, copy the person name below Yours sincerely / Yours faithfully and above the job title.'
+      'Images: full first page, the Dear Sir area for Organization and Receiver, the opening body for the underlined Subject, then the signature block if detected.',
+      'For Organization, copy ONLY the first complete line immediately above Dear Sir that begins with an English letter, not the second line, later address lines, or the letterhead. For Receiver, prefer the value after Attn: if present; otherwise copy only the first of those consecutive lines. For Subject, copy the full block after Subject: or Re:, including wrapped lines; if there is no such label, copy the underlined heading. For Sender, copy the person name below Yours sincerely / Yours faithfully and above the job title; if two names appear, copy the upper one.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Sender is the person name below Yours sincerely or Yours faithfully and above the job title. Receiver is the value after Attn: if present, otherwise the first of the consecutive lines immediately above Dear Sir. Subject is only the underlined words after Dear Sir, not the whole sentence.'
+      'Organization is ONLY the first complete line immediately above Dear Sir, not the second line and not the letterhead. Sender is the person name below Yours sincerely or Yours faithfully and above the job title. Receiver is the value after Attn: if present, otherwise the first of those consecutive lines. Subject is the full block after Subject: or Re:, or the underlined heading if those labels are missing.'
     ];
 
   const parts = [
@@ -201,15 +205,20 @@ function buildUserPrompt(
   } else {
     parts.push('', 'If Attn: is present, Receiver is the value after Attn:. If not, Receiver is the first of the consecutive lines immediately above Dear Sir.');
   }
-  if (subjectText && subjectText.trim()) {
-    parts.push('', 'Detected Subject from the underlined words after Dear Sir:', subjectText.trim());
+  if (organization && organization.trim()) {
+    parts.push('', 'Detected Organization from the first English line immediately above Dear Sir:', organization.trim());
   } else {
-    parts.push('', 'Look after Dear Sir for words sitting on an underline. Subject is only those underlined words, not the rest of the sentence and not later underlines.');
+    parts.push('', 'Organization is ONLY the first complete line immediately above Dear Sir that begins with an English letter. Do not include the second line or later address lines.');
+  }
+  if (subjectText && subjectText.trim()) {
+    parts.push('', 'Detected Subject from the full Re: / Subject: block or underlined heading:', subjectText.trim());
+  } else {
+    parts.push('', 'Copy the full consecutive block after Subject: or Re:, including wrapped lines. If those labels are missing, copy the underlined heading in the middle of the letter.');
   }
   if (refNo && refNo.trim()) {
-    parts.push('', 'Detected Ref No from the value to the right of Our Ref:', refNo.trim());
+    parts.push('', 'Detected Ref No from Our Ref: or standalone Ref:', refNo.trim());
   } else {
-    parts.push('', 'Find Our Ref: or Our Ref :. Ref No is only the value to the right of that label, not Your Ref.');
+    parts.push('', 'Find Our Ref: first. If it is missing, use a standalone Ref: / Ref :. Ref No is the value to the right of that label, not Your Ref.');
   }
   return parts.join('\n');
 }
@@ -260,7 +269,7 @@ async function buildPageImages(
         images.push({
           url: crop,
           detail: 'high',
-          label: 'Letter body. Receiver is the first of the consecutive lines immediately above Dear Sir. Subject is ONLY the underlined words after Dear Sir, not the rest of the sentence:'
+          label: 'Letter body. Organization is ONLY the first complete line immediately above Dear Sir, not the second line and not the top letterhead. Receiver is the first of those lines unless Attn: is present. Subject is the full block after Subject: or Re:, including wrapped lines:'
         });
       }
     }

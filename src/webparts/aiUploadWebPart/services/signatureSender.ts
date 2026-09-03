@@ -1,6 +1,14 @@
 import { IOcrPageResult, IOcrWord } from './IPdfOcr';
 import { joinOcrWords } from './ocrSelection';
 
+interface IInkBand {
+  pixels: Uint8ClampedArray;
+  width: number;
+  height: number;
+  x0: number;
+  y0: number;
+}
+
 export interface ISignatureRegion {
   x0: number;
   y0: number;
@@ -74,9 +82,48 @@ export function extractReceiverAboveDearSir(page?: IOcrPageResult): string {
   }
 }
 
+export function extractOrganizationAboveAddressee(page?: IOcrPageResult): string {
+  if (!page) {
+    return '';
+  }
+  try {
+    const fromWords = consecutiveAddresseeLines(page)
+      .map((line) => completeAddresseeLine(page, line))
+      .filter((line) => line.length > 0);
+    const fromBlock = organizationFromLines(fromWords);
+    if (fromBlock) {
+      return fromBlock;
+    }
+    return organizationFromLines(consecutiveBlockFromText(page.text || ''));
+  } catch {
+    return '';
+  }
+}
+
+function organizationFromLines(lines: string[]): string {
+  for (let index = 0; index < lines.length; index++) {
+    const line = (lines[index] || '').replace(/\s+/g, ' ').trim();
+    if (!line || isSalutationLine(line) || isAddressBlockStop(line)) {
+      continue;
+    }
+    if (/^(?:for\s+the\s+)?att(?:n|ention)\b/i.test(line)) {
+      continue;
+    }
+    if (!/^[A-Za-z]/.test(line)) {
+      continue;
+    }
+    return line;
+  }
+  return '';
+}
+
 export async function extractSubjectBelowDearSir(page?: IOcrPageResult): Promise<string> {
   if (!page) {
     return '';
+  }
+  const fromLabel = subjectFromReBlock(page);
+  if (fromLabel) {
+    return fromLabel;
   }
   return subjectFromUnderline(page);
 }
@@ -155,7 +202,7 @@ function valueAfterAttn(words: IOcrWord[], index: number): string {
   while (words[start]) {
     const raw = (words[start].text || '').trim();
     const key = wordKey(raw);
-    if (/^[:.\-]+$/.test(raw) || key === 'of' || key === 'to') {
+    if (/^[:.-]+$/.test(raw) || key === 'of' || key === 'to') {
       start++;
       continue;
     }
@@ -217,7 +264,7 @@ function isAttnValueStop(text: string): boolean {
 
 function attnFromText(text: string): string {
   const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
-  const pattern = /(?:for\s+the\s+)?att(?:n|ention|in|m)\s*(?:of)?\s*[:.\-]?\s*(.+)$/i;
+  const pattern = /(?:for\s+the\s+)?att(?:n|ention|in|m)\s*(?:of)?\s*[:.-]?\s*(.+)$/i;
   for (let index = 0; index < lines.length; index++) {
     const match = lines[index].match(pattern);
     if (!match) {
@@ -263,19 +310,24 @@ function addresseeBlockFromText(text: string): string {
 }
 
 function addresseeBlockFromWords(page: IOcrPageResult): string {
+  const block = consecutiveAddresseeLines(page);
+  return block.length > 0 ? block[0].text : '';
+}
+
+function consecutiveAddresseeLines(page: IOcrPageResult): { text: string; y0: number; y1: number }[] {
   const hit = findSalutationHit(page.words || []);
   if (!hit) {
-    return '';
+    return [];
   }
   const above = (page.words || []).filter((word) => {
     const midX = (word.x0 + word.x1) / 2;
     const midY = (word.y0 + word.y1) / 2;
     return midY < hit.y0 - 1 &&
-      midY >= hit.y0 - Math.max(280, page.height * 0.45) &&
-      midX <= page.width * 0.55;
+      midY >= hit.y0 - Math.max(380, page.height * 0.58) &&
+      midX <= page.width * 0.92;
   });
   const lines = groupWordsIntoLines(above).filter((line) => line.y1 < hit.y0);
-  const block: string[] = [];
+  const block: { text: string; y0: number; y1: number }[] = [];
   let nextTop = hit.y0;
   for (let index = lines.length - 1; index >= 0; index--) {
     const line = lines[index];
@@ -286,19 +338,105 @@ function addresseeBlockFromWords(page: IOcrPageResult): string {
       break;
     }
     const lineHeight = Math.max(12, line.y1 - line.y0);
-    if (block.length > 0 && nextTop - line.y1 > lineHeight * 2.2) {
+    if (block.length > 0 && nextTop - line.y1 > lineHeight * 2.8) {
       break;
     }
-    block.unshift(line.text);
+    block.unshift(line);
     nextTop = line.y0;
-    if (block.length >= 8) {
+    if (block.length >= 12) {
       break;
     }
   }
-  return block.length > 0 ? block[0] : '';
+  return block;
+}
+
+function completeAddresseeLine(
+  page: IOcrPageResult,
+  line: { text: string; y0: number; y1: number }
+): string {
+  const midY = (line.y0 + line.y1) / 2;
+  const lineHeight = Math.max(10, line.y1 - line.y0);
+  const onLine = (page.words || []).filter((word) => {
+    const wordMid = (word.y0 + word.y1) / 2;
+    return Math.abs(wordMid - midY) <= lineHeight * 0.7;
+  }).sort((left, right) => left.x0 - right.x0);
+
+  if (onLine.length === 0) {
+    return (line.text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  const leftCluster: IOcrWord[] = [];
+  const gapLimit = Math.max(40, page.width * 0.065);
+  for (let index = 0; index < onLine.length; index++) {
+    const word = onLine[index];
+    if (isRightColumnLabel(onLine, index)) {
+      break;
+    }
+    if (leftCluster.length > 0) {
+      const previous = leftCluster[leftCluster.length - 1];
+      if (word.x0 - previous.x1 > gapLimit) {
+        break;
+      }
+    }
+    leftCluster.push(word);
+  }
+
+  const completed = joinOcrWords(leftCluster).replace(/\s+/g, ' ').trim();
+  const original = (line.text || '').replace(/\s+/g, ' ').trim();
+  return completed.length >= original.length ? completed : original;
+}
+
+function isRightColumnLabel(words: IOcrWord[], index: number): boolean {
+  const key = wordKey(words[index].text || '');
+  if (key === 'date' || key === 'tel' || key === 'fax' || key === 'email' || key === 'page') {
+    return true;
+  }
+  const next = words[index + 1];
+  const nextKey = next ? wordKey(next.text || '') : '';
+  if ((key === 'our' || key === 'your' || key === 'you' || key === 'yr') &&
+    (/^r+e+fs?(no|number)?$/.test(nextKey) || nextKey === 'reference')) {
+    return true;
+  }
+  if (/^(our|your)?r+e+fs?(no|number)?$/.test(key) || key === 'reference' || key === 'ourreference' || key === 'yourreference') {
+    const prev = words[index - 1];
+    const prevKey = prev ? wordKey(prev.text || '') : '';
+    if (key.indexOf('our') === 0 || key.indexOf('your') === 0) {
+      return true;
+    }
+    return prevKey === 'our' || prevKey === 'your' || prevKey === 'you' || prevKey === 'yr';
+  }
+  const prev = words[index - 1];
+  const prevKey = prev ? wordKey(prev.text || '') : '';
+  return (key === 'ref' || key === 'reference') &&
+    (prevKey === 'our' || prevKey === 'your' || prevKey === 'you' || prevKey === 'yr');
+}
+
+function consecutiveBlockFromText(text: string): string[] {
+  const raw = (text || '').split(/\r?\n/).map((line) => line.trim());
+  let dearIndex = -1;
+  for (let index = 0; index < raw.length; index++) {
+    if (isSalutationLine(raw[index])) {
+      dearIndex = index;
+      break;
+    }
+  }
+  if (dearIndex < 0) {
+    const salutation = findSalutationIndex(text || '');
+    if (salutation.index < 0) {
+      return [];
+    }
+    const before = (text || '').substring(0, salutation.index).split(/\r?\n/).map((line) => line.trim());
+    return consecutiveLinesFromList(before);
+  }
+  return consecutiveLinesFromList(raw.slice(0, dearIndex));
 }
 
 function firstLineOfConsecutiveBlock(lines: string[]): string {
+  const block = consecutiveLinesFromList(lines);
+  return block.length > 0 ? block[0] : '';
+}
+
+function consecutiveLinesFromList(lines: string[]): string[] {
   const block: string[] = [];
   let sawGap = false;
   for (let index = lines.length - 1; index >= 0; index--) {
@@ -320,11 +458,11 @@ function firstLineOfConsecutiveBlock(lines: string[]): string {
       break;
     }
     block.unshift(line.replace(/\s+/g, ' ').trim());
-    if (block.length >= 8) {
+    if (block.length >= 12) {
       break;
     }
   }
-  return block.length > 0 ? block[0] : '';
+  return block;
 }
 
 function groupWordsIntoLines(words: IOcrWord[]): { text: string; y0: number; y1: number }[] {
@@ -398,108 +536,248 @@ async function subjectFromUnderline(page: IOcrPageResult): Promise<string> {
     canvas.width = 0;
     canvas.height = 0;
 
-    const rows: { y: number; left: number; right: number }[] = [];
-    for (let row = 0; row < height; row++) {
-      const span = longestDarkSpan(pixels, width, row, 140);
-      if (!span) {
-        continue;
-      }
-      const pageLeft = x0 + span.left;
-      const pageRight = x0 + span.right;
-      const spanWidth = pageRight - pageLeft;
-      if (spanWidth < Math.max(36, image.width * 0.08) || spanWidth > image.width * 0.82) {
-        continue;
-      }
-      if (pageLeft < image.width * 0.08 && spanWidth > image.width * 0.55) {
-        continue;
-      }
-      rows.push({ y: y0 + row, left: pageLeft, right: pageRight });
-    }
-
-    const clustered: { y0: number; y1: number; left: number; right: number }[] = [];
-    rows.forEach((row) => {
-      const last = clustered[clustered.length - 1];
-      if (!last || row.y - last.y1 > 2) {
-        clustered.push({ y0: row.y, y1: row.y, left: row.left, right: row.right });
-        return;
-      }
-      last.y1 = row.y;
-      last.left = Math.min(last.left, row.left);
-      last.right = Math.max(last.right, row.right);
-    });
-
-    const headings: string[] = [];
-    let lastAcceptedY = 0;
-    for (let index = 0; index < clustered.length; index++) {
-      const cluster = clustered[index];
-      if (cluster.y1 - cluster.y0 > 5) {
-        continue;
-      }
-      const underline = { y: cluster.y1, left: cluster.left, right: cluster.right };
-      const line = wordsOnUnderline(page, underline);
-      if (!looksLikeSubjectHeading(line)) {
-        if (headings.length > 0) {
-          break;
-        }
-        continue;
-      }
-      if (headings.length > 0 && underline.y - lastAcceptedY > 40) {
-        break;
-      }
-      if (headings.indexOf(line) < 0) {
-        headings.push(line);
-      }
-      lastAcceptedY = underline.y;
-      if (headings.length >= 3) {
-        break;
+    const reLine = chooseReLine(page);
+    const dear = findSalutationHit(page.words || []);
+    const ink: IInkBand = { pixels, width, height, x0, y0 };
+    const reY = reLine ? reLine.y0 : -1;
+    const dearY = dear ? dear.y1 : -1;
+    const thresholds = [110, 130, 150, 175, 195];
+    for (let index = 0; index < thresholds.length; index++) {
+      const found = headingsFromUnderlinePixels(
+        page,
+        pixels,
+        width,
+        height,
+        x0,
+        y0,
+        image.width,
+        image.height,
+        thresholds[index],
+        reY,
+        dearY,
+        ink
+      );
+      if (found) {
+        return found;
       }
     }
-    return headings.join(' ').trim();
+    return '';
   } catch {
     return '';
   }
 }
 
+function headingsFromUnderlinePixels(
+  page: IOcrPageResult,
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x0: number,
+  y0: number,
+  pageWidth: number,
+  pageHeight: number,
+  maxLum: number,
+  reY: number,
+  dearY: number,
+  ink: IInkBand
+): string {
+  const maxUnderlineHeight = Math.max(18, Math.round(pageHeight * 0.012));
+  const fragments: { y: number; left: number; right: number }[] = [];
+  for (let row = 0; row < height; row++) {
+    const spans = darkSpansOnRow(pixels, width, row, maxLum);
+    for (let spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+      const span = spans[spanIndex];
+      const pageLeft = x0 + span.left;
+      const pageRight = x0 + span.right;
+      const spanWidth = pageRight - pageLeft;
+      if (spanWidth < Math.max(10, pageWidth * 0.02) || spanWidth > pageWidth * 0.94) {
+        continue;
+      }
+      fragments.push({ y: y0 + row, left: pageLeft, right: pageRight });
+    }
+  }
+
+  const clustered = clusterUnderlineFragments(fragments, maxUnderlineHeight);
+  const candidates: { line: string; y: number; score: number }[] = [];
+  for (let index = 0; index < clustered.length; index++) {
+    const cluster = clustered[index];
+    if (cluster.y1 - cluster.y0 > maxUnderlineHeight) {
+      continue;
+    }
+    if (cluster.y1 < pageHeight * 0.12 && !(reY >= 0 && cluster.y1 >= reY - 4)) {
+      continue;
+    }
+    const underline = { y: cluster.y1, left: cluster.left, right: cluster.right };
+    const words = wordsSittingOnUnderline(page, underline);
+    const chosen = preferBoldWords(words, ink);
+    const line = stripSubjectLabel(joinOcrWords(chosen.length > 0 ? chosen : words));
+    if (!looksLikeSubjectHeading(line)) {
+      continue;
+    }
+    const density = averageInkDensity(ink, chosen.length > 0 ? chosen : words);
+    const pageMid = pageHeight * 0.42;
+    const centerX = pageWidth * 0.5;
+    const midX = (cluster.left + cluster.right) / 2;
+    const length = line.length;
+    const lengthScore = length >= 8 && length <= 100
+      ? 48 - Math.abs(length - 40) * 0.4
+      : length > 100
+        ? Math.max(0, 24 - (length - 100) * 0.25)
+        : length * 2;
+    let score = lengthScore + density * 80;
+    if (reY >= 0 && cluster.y1 >= reY - 8 && cluster.y1 <= reY + pageHeight * 0.36) {
+      score += 50;
+    }
+    if (dearY >= 0 && cluster.y1 >= dearY - 6) {
+      score += 20;
+    }
+    score += Math.max(0, 24 - Math.abs(cluster.y1 - pageMid) / pageHeight * 70);
+    if (Math.abs(midX - centerX) < pageWidth * 0.28) {
+      score += 12;
+    }
+    candidates.push({ line, y: cluster.y1, score });
+  }
+
+  if (candidates.length === 0) {
+    return '';
+  }
+
+  const groups: { lines: string[]; score: number; y1: number }[] = [];
+  const groupGap = Math.max(40, pageHeight * 0.03);
+  candidates.forEach((item) => {
+    const last = groups[groups.length - 1];
+    if (last && item.y - last.y1 <= groupGap && last.lines.length < 3) {
+      if (last.lines.indexOf(item.line) < 0) {
+        last.lines.push(item.line);
+      }
+      last.score += item.score;
+      last.y1 = item.y;
+      return;
+    }
+    groups.push({ lines: [item.line], score: item.score, y1: item.y });
+  });
+  groups.sort((left, right) => right.score - left.score);
+  return groups[0].lines.join(' ').trim();
+}
+
+function clusterUnderlineFragments(
+  fragments: { y: number; left: number; right: number }[],
+  maxUnderlineHeight: number
+): { y0: number; y1: number; left: number; right: number }[] {
+  const clustered: { y0: number; y1: number; left: number; right: number }[] = [];
+  fragments.forEach((fragment) => {
+    let matched: { y0: number; y1: number; left: number; right: number } | undefined;
+    for (let index = clustered.length - 1; index >= 0; index--) {
+      const item = clustered[index];
+      if (fragment.y - item.y1 > 3) {
+        break;
+      }
+      const gap = fragment.left > item.right
+        ? fragment.left - item.right
+        : item.left > fragment.right
+          ? item.left - fragment.right
+          : 0;
+      if (gap <= 32 && fragment.y - item.y0 <= maxUnderlineHeight) {
+        matched = item;
+        break;
+      }
+    }
+    if (!matched) {
+      clustered.push({ y0: fragment.y, y1: fragment.y, left: fragment.left, right: fragment.right });
+      return;
+    }
+    matched.y1 = fragment.y;
+    matched.left = Math.min(matched.left, fragment.left);
+    matched.right = Math.max(matched.right, fragment.right);
+  });
+  clustered.sort((left, right) => {
+    if (Math.abs(left.y0 - right.y0) > 4) {
+      return left.y0 - right.y0;
+    }
+    return left.left - right.left;
+  });
+  return clustered;
+}
+
 function subjectScanBand(page: IOcrPageResult, width: number, height: number): ISignatureRegion {
   const hit = findSalutationHit(page.words || []);
   const closing = findClosingHit(page.words || []);
-  const y0 = hit
-    ? Math.min(height - 2, Math.floor(hit.y1 + 8))
-    : Math.floor(height * 0.22);
+  const reTop = reLabelTop(page);
+  const linePad = Math.max(10, Math.round(height * 0.014));
+  let y0 = height * 0.14;
+  if (hit) {
+    y0 = hit.y0 - linePad;
+  }
+  if (reTop >= 0) {
+    y0 = Math.min(y0, reTop - linePad);
+  }
+  y0 = Math.max(0, Math.floor(y0));
   const y1 = Math.min(
-    height,
-    closing ? closing.y1 - 16 : height,
-    y0 + Math.max(110, Math.round(height * 0.28))
+    Math.floor(height * 0.88),
+    closing ? Math.max(y0 + 8, closing.y1 - 24) : Math.floor(height * 0.86)
   );
   return {
-    x0: Math.floor(width * 0.06),
+    x0: Math.floor(width * 0.04),
     y0,
-    x1: Math.floor(width * 0.94),
+    x1: Math.floor(width * 0.96),
     y1: Math.max(y0 + 8, y1)
   };
 }
 
-function longestDarkSpan(
+function reLabelTop(page: IOcrPageResult): number {
+  const line = chooseReLine(page);
+  return line ? line.y0 : -1;
+}
+
+function chooseReLine(page: IOcrPageResult): { text: string; y0: number; y1: number } | undefined {
+  const lines = groupWordsIntoLines(page.words || []);
+  if (lines.length === 0) {
+    return undefined;
+  }
+  const dear = findSalutationHit(page.words || []);
+  const hits: number[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (matchReLabel(lines[index].text) !== undefined) {
+      hits.push(index);
+    }
+  }
+  if (hits.length === 0) {
+    return undefined;
+  }
+  let chosen = hits[0];
+  if (dear) {
+    const below = hits.filter((index) => lines[index].y0 >= dear.y1 - 6);
+    if (below.length > 0) {
+      chosen = below[0];
+    } else {
+      const above = hits.filter((index) => lines[index].y1 <= dear.y0 + 6);
+      if (above.length > 0) {
+        chosen = above[above.length - 1];
+      }
+    }
+  }
+  return lines[chosen];
+}
+
+function darkSpansOnRow(
   pixels: Uint8ClampedArray,
   width: number,
   row: number,
   maxLum: number
-): { left: number; right: number } | undefined {
-  let bestLeft = 0;
-  let bestRight = -1;
+): { left: number; right: number }[] {
+  const spans: { left: number; right: number }[] = [];
+  const minRun = Math.max(8, Math.round(width * 0.015));
   let runLeft = -1;
   let darkInRun = 0;
-  const minRun = Math.max(24, Math.round(width * 0.08));
 
-  const finishRun = (end: number) => {
+  const finishRun = (end: number): void => {
     if (runLeft < 0) {
       return;
     }
     const runWidth = end - runLeft;
     const coverage = darkInRun / Math.max(1, runWidth);
-    if (runWidth >= minRun && coverage > 0.34 && runWidth > bestRight - bestLeft) {
-      bestLeft = runLeft;
-      bestRight = end - 1;
+    if (runWidth >= minRun && coverage > 0.16) {
+      spans.push({ left: runLeft, right: end - 1 });
     }
     runLeft = -1;
     darkInRun = 0;
@@ -514,37 +792,112 @@ function longestDarkSpan(
         darkInRun = 0;
       }
       darkInRun++;
-    } else if (runLeft >= 0 && col - runLeft - darkInRun > 6) {
+    } else if (runLeft >= 0 && col - runLeft - darkInRun > 5) {
       finishRun(col);
     }
   }
   finishRun(width);
-
-  if (bestRight < bestLeft) {
-    return undefined;
-  }
-  return { left: bestLeft, right: bestRight };
+  return mergeCloseSpans(spans, 22);
 }
 
-function wordsOnUnderline(
+function mergeCloseSpans(
+  spans: { left: number; right: number }[],
+  maxGap: number
+): { left: number; right: number }[] {
+  if (spans.length === 0) {
+    return spans;
+  }
+  const merged: { left: number; right: number }[] = [spans[0]];
+  for (let index = 1; index < spans.length; index++) {
+    const last = merged[merged.length - 1];
+    const next = spans[index];
+    if (next.left - last.right <= maxGap) {
+      last.right = next.right;
+    } else {
+      merged.push({ left: next.left, right: next.right });
+    }
+  }
+  return merged;
+}
+
+function wordsSittingOnUnderline(
   page: IOcrPageResult,
   underline: { y: number; left: number; right: number }
-): string {
-  const pad = Math.max(6, (underline.right - underline.left) * 0.06);
-  const words = (page.words || []).filter((word) => {
+): IOcrWord[] {
+  const pad = Math.max(12, (underline.right - underline.left) * 0.1);
+  return (page.words || []).filter((word) => {
     const midX = (word.x0 + word.x1) / 2;
-    return word.y1 <= underline.y + 4 &&
-      word.y1 >= underline.y - 34 &&
-      word.y0 < underline.y &&
-      midX >= underline.left - pad &&
-      midX <= underline.right + pad;
+    const height = Math.max(8, word.y1 - word.y0);
+    const above = Math.max(36, height * 2.2);
+    const below = Math.max(10, height * 0.7);
+    return midX >= underline.left - pad &&
+      midX <= underline.right + pad &&
+      word.y0 <= underline.y + 6 &&
+      word.y1 >= underline.y - above &&
+      word.y1 <= underline.y + below;
   });
-  return stripSubjectLabel(joinOcrWords(words));
+}
+
+function preferBoldWords(words: IOcrWord[], ink?: IInkBand): IOcrWord[] {
+  if (!ink || words.length < 2) {
+    return words;
+  }
+  const scored = words.map((word) => ({ word, density: wordInkDensity(ink, word) }));
+  const densities = scored.map((item) => item.density).sort((left, right) => left - right);
+  const median = densities[Math.floor(densities.length / 2)] || 0;
+  const heaviest = densities[densities.length - 1] || 0;
+  const lightest = densities[0] || 0;
+  if (heaviest - lightest < 0.1) {
+    return words;
+  }
+  const bold = scored.filter((item) => item.density >= Math.max(median, (median + heaviest) / 2));
+  if (bold.length === 0 || bold.length === words.length) {
+    return words;
+  }
+  return bold.map((item) => item.word);
+}
+
+function averageInkDensity(ink: IInkBand, words: IOcrWord[]): number {
+  if (words.length === 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (let index = 0; index < words.length; index++) {
+    sum += wordInkDensity(ink, words[index]);
+  }
+  return sum / words.length;
+}
+
+function wordInkDensity(ink: IInkBand, word: IOcrWord): number {
+  const left = Math.max(0, Math.floor(word.x0 - ink.x0));
+  const top = Math.max(0, Math.floor(word.y0 - ink.y0));
+  const right = Math.min(ink.width, Math.ceil(word.x1 - ink.x0));
+  const bottom = Math.min(ink.height, Math.ceil(word.y1 - ink.y0));
+  if (right - left < 2 || bottom - top < 2) {
+    return 0;
+  }
+  let dark = 0;
+  let total = 0;
+  for (let row = top; row < bottom; row++) {
+    for (let col = left; col < right; col++) {
+      const index = (row * ink.width + col) * 4;
+      const lum = 0.299 * ink.pixels[index] + 0.587 * ink.pixels[index + 1] + 0.114 * ink.pixels[index + 2];
+      total++;
+      if (lum < 145) {
+        dark++;
+      }
+    }
+  }
+  return total > 0 ? dark / total : 0;
 }
 
 function looksLikeSubjectHeading(line: string): boolean {
   const trimmed = (line || '').trim();
-  if (trimmed.length < 4 || trimmed.length > 140) {
+  const letters = trimmed.replace(/[\s_\-.=]/g, '');
+  if (letters.length < 2 || trimmed.length > 160) {
+    return false;
+  }
+  if (/^[_.=-]{3,}$/.test(trimmed)) {
     return false;
   }
   if (isSalutationLine(trimmed) || isClosingLine(trimmed) || isBodyStart(trimmed) || isAddressBlockStop(trimmed)) {
@@ -555,15 +908,166 @@ function looksLikeSubjectHeading(line: string): boolean {
 
 function stripSubjectLabel(line: string): string {
   return (line || '')
-    .replace(/^(re|subject|ref)\s*[:.\-]\s*/i, '')
+    .replace(/^(re|subject|ref)\s*[:.-]\s*/i, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
+function subjectFromReBlock(page: IOcrPageResult): string {
+  const fromWords = subjectFromReWords(page);
+  if (fromWords) {
+    return fromWords;
+  }
+  return subjectFromReText(page.text || '');
+}
+
+function subjectFromReWords(page: IOcrPageResult): string {
+  const lines = groupWordsIntoLines(page.words || []);
+  if (lines.length === 0) {
+    return '';
+  }
+  const dear = findSalutationHit(page.words || []);
+  const hits: number[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (matchReLabel(lines[index].text) !== undefined) {
+      hits.push(index);
+    }
+  }
+  if (hits.length === 0) {
+    return '';
+  }
+  let chosen = hits[0];
+  if (dear) {
+    const below = hits.filter((index) => lines[index].y0 >= dear.y1 - 6);
+    if (below.length > 0) {
+      chosen = below[0];
+    } else {
+      const above = hits.filter((index) => lines[index].y1 <= dear.y0 + 6);
+      if (above.length > 0) {
+        chosen = above[above.length - 1];
+      }
+    }
+  }
+  return collectReContinuation(lines, chosen, dear ? dear.y0 : -1);
+}
+
+function subjectFromReText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.trim());
+  const compact: { text: string; sourceIndex: number }[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index]) {
+      compact.push({ text: lines[index], sourceIndex: index });
+    }
+  }
+  let dearIndex = -1;
+  for (let index = 0; index < compact.length; index++) {
+    if (isSalutationLine(compact[index].text)) {
+      dearIndex = index;
+      break;
+    }
+  }
+  const hits: number[] = [];
+  for (let index = 0; index < compact.length; index++) {
+    if (matchReLabel(compact[index].text) !== undefined) {
+      hits.push(index);
+    }
+  }
+  if (hits.length === 0) {
+    return '';
+  }
+  let chosen = hits[0];
+  if (dearIndex >= 0) {
+    const below = hits.filter((index) => index >= dearIndex);
+    if (below.length > 0) {
+      chosen = below[0];
+    } else {
+      const above = hits.filter((index) => index < dearIndex);
+      if (above.length > 0) {
+        chosen = above[above.length - 1];
+      }
+    }
+  }
+  const mapped = compact.map((line, index) => ({
+    text: line.text,
+    y0: line.sourceIndex,
+    y1: line.sourceIndex
+  }));
+  return collectReContinuation(mapped, chosen, dearIndex >= 0 ? compact[dearIndex].sourceIndex : -1);
+}
+
+function matchReLabel(line: string): { value: string } | undefined {
+  const trimmed = (line || '').replace(/\s+/g, ' ').trim();
+  if (!trimmed || /\b(?:our|your?|yr)\s+(?:re|ref)\b/i.test(trimmed)) {
+    return undefined;
+  }
+  const match = trimmed.match(/^(?:re|subject)\s*[:;\uFF1A]\s*(.*)$/i);
+  if (match) {
+    return { value: stripSubjectLabel(match[1] || '') };
+  }
+  if (/^(?:re|subject)$/i.test(trimmed)) {
+    return { value: '' };
+  }
+  return undefined;
+}
+
+function collectReContinuation(
+  lines: { text: string; y0: number; y1: number }[],
+  startIndex: number,
+  dearY: number
+): string {
+  const start = lines[startIndex];
+  if (!start) {
+    return '';
+  }
+  const label = matchReLabel(start.text);
+  const block: string[] = [];
+  if (label && label.value) {
+    block.push(cleanSubjectLine(label.value));
+  }
+  const reIsAboveDear = dearY >= 0 && start.y1 < dearY - 2;
+  for (let index = startIndex + 1; index < lines.length && block.length < 12; index++) {
+    const line = lines[index];
+    const text = cleanSubjectLine(line.text);
+    if (!text) {
+      if (block.length > 0) {
+        break;
+      }
+      continue;
+    }
+    if (reIsAboveDear && line.y0 >= dearY - 2) {
+      break;
+    }
+    const previous = lines[index - 1];
+    const lineHeight = Math.max(12, previous.y1 - previous.y0, 1);
+    if (line.y0 - previous.y1 > lineHeight * 3.2) {
+      break;
+    }
+    if (isSubjectContinueStop(text)) {
+      break;
+    }
+    block.push(text);
+  }
+  return block.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function cleanSubjectLine(line: string): string {
+  return stripSubjectLabel(line)
+    .replace(/\b(date|tel|fax|email)\s*[:.].*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isSubjectContinueStop(line: string): boolean {
+  return isSalutationLine(line) ||
+    isClosingLine(line) ||
+    isBodyStart(line) ||
+    isAddressBlockStop(line) ||
+    /^(?:attn|attention|cc)\b/i.test((line || '').trim());
+}
+
 function isBodyStart(line: string): boolean {
   const trimmed = (line || '').trim();
-  return trimmed.length > 140 ||
-    /^(i|we|please|thank|further|with reference)\b/i.test(trimmed);
+  return /^(i|we|please|thank|further|with reference)\b/i.test(trimmed);
 }
 
 function findSalutationIndex(text: string): { index: number } {
@@ -769,12 +1273,12 @@ function nameBetweenClosingAndTitleFromWords(page: IOcrPageResult): string {
   const below = (page.words || []).filter((word) => {
     const midX = (word.x0 + word.x1) / 2;
     const midY = (word.y0 + word.y1) / 2;
-    return midY > closing.y1 + 1 &&
-      midY <= closing.y1 + Math.max(220, page.height * 0.34) &&
-      midX >= closing.x0 - page.width * 0.22;
+    return word.y0 >= closing.y1 - 10 &&
+      midY <= closing.y1 + Math.max(260, page.height * 0.38) &&
+      midX >= Math.max(0, closing.x0 - page.width * 0.4);
   });
-  const lines = groupWordsIntoLines(below).map((line) => line.text);
-  return pickNameAboveTitle(lines);
+  const lines = groupWordsIntoLines(below);
+  return pickNameAboveTitle(lines.map((line) => ({ text: line.text, y0: line.y0 })));
 }
 
 function nameBetweenClosingAndTitleFromText(text: string): string {
@@ -786,41 +1290,119 @@ function nameBetweenClosingAndTitleFromText(text: string): string {
     if (!isClosingLine(lines[index])) {
       continue;
     }
-    return pickNameAboveTitle(lines.slice(index + 1, index + 10));
+    const after = lines.slice(index + 1, index + 12).map((line, offset) => ({
+      text: line,
+      y0: offset
+    }));
+    return pickNameAboveTitle(after);
   }
   return '';
 }
 
-function pickNameAboveTitle(lines: string[]): string {
-  const zone: string[] = [];
+function pickNameAboveTitle(lines: { text: string; y0: number }[]): string {
+  const found: { name: string; y0: number }[] = [];
   for (let index = 0; index < lines.length; index++) {
-    const raw = (lines[index] || '').replace(/\s+/g, ' ').trim();
-    if (!raw || isClosingLine(raw)) {
+    const raw = (lines[index].text || '').replace(/\s+/g, ' ').trim();
+    if (!raw || isClosingLine(raw) || isActingForLine(raw) || isIgnorableBelowClosing(raw)) {
       continue;
-    }
-    if (isJobTitleLine(raw)) {
-      break;
     }
     const cleaned = stripTrailingTitle(raw);
-    if (!cleaned || isIgnorableBelowClosing(cleaned)) {
+    if (!cleaned || isActingForLine(cleaned) || isIgnorableBelowClosing(cleaned)) {
       continue;
     }
-    zone.push(cleaned);
+    if (isJobTitleLine(raw) || isJobTitleLine(cleaned)) {
+      const nameOnTitleLine = preferredNameFromLine(cleaned);
+      if (nameOnTitleLine) {
+        found.push({ name: nameOnTitleLine, y0: lines[index].y0 });
+      }
+      if (found.length > 0) {
+        break;
+      }
+      continue;
+    }
+    const names = candidateNamesFromLine(cleaned);
+    for (let nameIndex = 0; nameIndex < names.length; nameIndex++) {
+      found.push({ name: names[nameIndex], y0: lines[index].y0 });
+    }
   }
 
-  for (let index = 0; index < zone.length; index++) {
-    const inner = firstParenthesesContent(zone[index]);
-    if (inner) {
-      return inner;
+  if (found.length === 0) {
+    return '';
+  }
+  found.sort((left, right) => left.y0 - right.y0);
+  return found[0].name;
+}
+
+function candidateNamesFromLine(line: string): string[] {
+  const primary = preferredNameFromLine(line);
+  if (primary) {
+    return [primary];
+  }
+  const left = leftPersonName(line);
+  return left ? [left] : [];
+}
+
+function preferredNameFromLine(line: string): string {
+  return nameFromZoneLine(line) || loosePersonName(line);
+}
+
+function nameFromZoneLine(line: string): string {
+  const inner = firstParenthesesContent(line);
+  if (inner) {
+    const fromInner = personNameFromLine(inner) || loosePersonName(inner);
+    if (fromInner) {
+      return fromInner;
     }
   }
-  for (let index = zone.length - 1; index >= 0; index--) {
-    const name = personNameFromLine(zone[index]);
-    if (name) {
-      return name;
-    }
+  return personNameFromLine(line);
+}
+
+function loosePersonName(line: string): string {
+  const text = (line || '')
+    .replace(/^[(\uFF08]\s*/, '')
+    .replace(/\s*[)\uFF09]$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || isJobTitleLine(text) || isNoiseLine(text) || isActingForLine(text)) {
+    return '';
   }
-  return zone.length > 0 ? zone[zone.length - 1] : '';
+  if (/工程師|總監|經理|主任|專員|顧問|秘書|署長|處長/.test(text)) {
+    return '';
+  }
+  const cjk = text.match(/[\u3400-\u9FFF]/g);
+  if (cjk && cjk.length >= 2 && cjk.length <= 4 && text.replace(/[\u3400-\u9FFF\s.·]/g, '').length === 0) {
+    return text;
+  }
+  const withoutTitle = text.replace(/^(ir|engr|eng|dr|mr|mrs|ms|prof)\.?\s+/i, '');
+  const tokens = withoutTitle.replace(/,/g, ' ').split(/\s+/).filter((token) => token.length > 0);
+  if (tokens.length === 0 || tokens.length > 5) {
+    return '';
+  }
+  const ok = tokens.every((token) =>
+    /^[A-Za-z]\.?$/.test(token) ||
+    /^[A-Za-z](?:\.[A-Za-z])+\.?$/.test(token) ||
+    /^[A-Z][a-z]+(?:-[A-Z][a-z]+)?$/.test(token) ||
+    /^[A-Z]{2,12}$/.test(token)
+  );
+  return ok ? text : '';
+}
+
+function leftPersonName(line: string): string {
+  const withoutTitle = (line || '').replace(/^(ir|engr|eng|dr|mr|mrs|ms|prof)\.?\s+/i, '');
+  const tokens = withoutTitle.replace(/,/g, ' ').split(/\s+/).filter((token) => token.length > 0);
+  if (tokens.length < 4) {
+    return '';
+  }
+  const firstThree = preferredNameFromLine(tokens.slice(0, 3).join(' '));
+  if (firstThree) {
+    return firstThree;
+  }
+  return preferredNameFromLine(tokens.slice(0, 2).join(' '));
+}
+
+function isActingForLine(line: string): boolean {
+  const key = normalizeKey(line);
+  return /^for\b/.test(key) || /\bon behalf\b/.test(key);
 }
 
 function isJobTitleLine(line: string): boolean {
@@ -828,15 +1410,14 @@ function isJobTitleLine(line: string): boolean {
   if (!key) {
     return false;
   }
-  if (/[\u3400-\u9FFF]*(工程師|總監|經理|主任|專員|顧問|秘書|署長|處長)/.test(line) &&
-    !looksLikePersonName(line)) {
+  if (/工程師|總監|經理|主任|專員|顧問|秘書|署長|處長/.test(line)) {
     return true;
   }
   const titles = [
     'director', 'manager', 'engineer', 'associate', 'consultant', 'officer',
     'secretary', 'architect', 'planner', 'surveyor', 'partner', 'chief',
     'assistant', 'principal', 'coordinator', 'specialist', 'supervisor',
-    'technician', 'inspector', 'executive', 'president'
+    'technician', 'inspector', 'executive', 'president', 'leader', 'head'
   ];
   const tokens = key.split(' ');
   for (let index = 0; index < titles.length; index++) {
@@ -848,8 +1429,11 @@ function isJobTitleLine(line: string): boolean {
 }
 
 function stripTrailingTitle(line: string): string {
-  const cut = (line || '').split(/,\s+(?=(?:ir|engr|eng|dr|mr|mrs|ms|prof)?\.?\s*(?:chief|director|manager|engineer|associate|consultant|officer|secretary|architect)\b)/i);
-  return (cut[0] || line || '').replace(/\s+/g, ' ').trim();
+  let text = (line || '').replace(/\s+/g, ' ').trim();
+  text = text.split(/,\s+(?=(?:ir|engr|eng|dr|mr|mrs|ms|prof)?\.?\s*(?:chief|director|manager|engineer|associate|consultant|officer|secretary|architect)\b)/i)[0] || text;
+  text = text.replace(/\s+(?:(?:ir|engr|eng|dr|mr|mrs|ms|prof)\.?\s+)?(?:chief\s+)?(?:director|manager|engineer|associate|consultant|officer|secretary|architect|planner|surveyor|partner|coordinator|specialist|supervisor|technician|inspector|executive|president|leader)\b.*$/i, '');
+  text = text.replace(/\s*(工程師|總監|經理|主任|專員|顧問|秘書|署長|處長)\s*$/, '');
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 function isIgnorableBelowClosing(line: string): boolean {
@@ -869,9 +1453,9 @@ function isClosingLine(line: string): boolean {
 }
 
 function firstParenthesesContent(text: string): string {
-  const matches = (text || '').match(/[\(\uFF08]\s*([^)\uFF09]{1,80}?)\s*[\)\uFF09]/g) || [];
+  const matches = (text || '').match(/[(\uFF08]\s*([^)\uFF09]{1,80}?)\s*[)\uFF09]/g) || [];
   for (let index = 0; index < matches.length; index++) {
-    const innerMatch = matches[index].match(/[\(\uFF08]\s*([^)\uFF09]{1,80}?)\s*[\)\uFF09]/);
+    const innerMatch = matches[index].match(/[(\uFF08]\s*([^)\uFF09]{1,80}?)\s*[)\uFF09]/);
     const inner = innerMatch ? innerMatch[1].replace(/\s+/g, ' ').trim() : '';
     if (inner && !isIgnorableParen(inner)) {
       return inner;
@@ -934,7 +1518,7 @@ function personNameFromLine(line: string): string {
     .replace(/^[\s(]+signed[\s)]+$/i, '')
     .replace(/^[-_.=]+$/, '')
     .trim();
-  if (!cleaned || isNoiseLine(cleaned) || !looksLikePersonName(cleaned)) {
+  if (!cleaned || isJobTitleLine(cleaned) || isNoiseLine(cleaned) || !looksLikePersonName(cleaned)) {
     return '';
   }
   return cleaned.replace(/\s+/g, ' ').trim();
@@ -967,6 +1551,9 @@ function hasHonorific(line: string): boolean {
 
 function looksLikePersonName(line: string): boolean {
   const trimmed = line.trim();
+  if (/工程師|總監|經理|主任|專員|顧問|秘書|署長|處長/.test(trimmed)) {
+    return false;
+  }
   const cjk = trimmed.match(/[\u3400-\u9FFF]/g);
   if (cjk && cjk.length >= 2 && cjk.length <= 4) {
     return trimmed.replace(/[\u3400-\u9FFF\s.·]/g, '').length === 0;

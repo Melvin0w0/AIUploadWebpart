@@ -21,7 +21,7 @@ import { locFormat } from '../loc/locFormat';
 import { PdfOcrService } from '../services/PdfOcrService';
 import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
 import PdfHighlightViewer from './PdfHighlightViewer';
-import { DEFAULT_FORM_FIELDS, isNameField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
+import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
 import { nameFromPdfFile } from '../constants/incomingName';
 import {
   canonicalLeadingBl,
@@ -42,7 +42,7 @@ import {
 } from '../constants/subProjectNumber';
 import { extractFieldValues, extractOurRefNo, extractYourRefNo } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
-import { analyzeSignature, asPersonName, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
+import { analyzeSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
 import { SharePointUploadService } from '../services/SharePointUploadService';
 import {
   buildUploadFileUrl,
@@ -520,10 +520,21 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (isSubProjectNumberField(label)) {
       return canonicalSubProjectNumber(value);
     }
-    if (isSenderField(label) || isReceiverField(label)) {
+    if (isReceiverField(label)) {
+      return this._stripHonorifics(this._stripParentheses(value));
+    }
+    if (isSenderField(label)) {
       return this._stripParentheses(value);
     }
     return value;
+  };
+
+  private _stripHonorifics = (value: string): string => {
+    return (value || '')
+      .replace(/^(?:(?:mr|mrs|ms|miss|dr|ir|prof(?:essor)?|engr?|sir|madam|mdm|mx|messrs)\b\.?\s*)+/i, '')
+      .replace(/\s*(?:先生|女士|小姐|太太)\s*$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
   private _stripParentheses = (value: string): string => {
@@ -532,9 +543,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     while (text !== previous) {
       previous = text;
       text = text
-        .replace(/^[\(\uFF08]\s*([\s\S]*?)\s*[\)\uFF09]$/, '$1')
-        .replace(/[\(\uFF08][^)\uFF09]*[\)\uFF09]/g, '')
-        .replace(/[\(\)\uFF08\uFF09]/g, '')
+        .replace(/^[(\uFF08]\s*([\s\S]*?)\s*[)\uFF09]$/, '$1')
+        .replace(/[(\uFF08][^)\uFF09]*[)\uFF09]/g, '')
+        .replace(/[()\uFF08\uFF09]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
     }
@@ -866,10 +877,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     let subjectText = '';
     let refNo = '';
     let projectNumber = '';
+    let organization = '';
     try {
       receiverName = extractReceiverAboveDearSir(firstPage);
     } catch {
       receiverName = '';
+    }
+    try {
+      organization = extractOrganizationAboveAddressee(firstPage);
+    } catch {
+      organization = '';
     }
     try {
       subjectText = await extractSubjectBelowDearSir(firstPage);
@@ -898,7 +915,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (isAiExtractionConfigured(aiConfig)) {
       try {
         const ocrText = (pages || []).map((page) => page.text || '').join('\n');
-        aiValues = await extractFieldsWithAi(ocrText, labels, aiConfig, firstPage, signature, receiverName, subjectText, refNo);
+        aiValues = await extractFieldsWithAi(ocrText, labels, aiConfig, firstPage, signature, receiverName, subjectText, refNo, organization);
       } catch {
         aiValues = {};
       }
@@ -930,6 +947,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           value = refNo || (aiValue || '').trim();
         } else if (isProjectNumberField(field.label)) {
           value = projectNumber || sanitizeProjectNumber(aiValue || '') || keywordValue || '';
+        } else if (isOrganizationField(field.label)) {
+          const aiOrganization = (aiValue || '').trim().split(/\r?\n/)[0].trim();
+          value = organization || aiOrganization || keywordValue || '';
         } else {
           value = (aiValue && aiValue.trim()) || keywordValue || '';
         }

@@ -1,5 +1,5 @@
-import { isReceiverField, isRefNoField, isSenderField, isSubjectField } from '../constants/defaultFormFields';
-import { isProjectNumberField, projectNumberFromYourRef } from '../constants/projectNumber';
+import { isOrganizationField, isReceiverField, isRefNoField, isSenderField, isSubjectField } from '../constants/defaultFormFields';
+import { isProjectNumberField } from '../constants/projectNumber';
 import { IOcrPageResult, IOcrWord } from './IPdfOcr';
 import { joinOcrWords } from './ocrSelection';
 
@@ -44,7 +44,7 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
   );
 
   fieldLabels.forEach((label) => {
-    if (isSenderField(label) || isReceiverField(label) || isSubjectField(label) || isRefNoField(label) || isProjectNumberField(label)) {
+    if (isSenderField(label) || isReceiverField(label) || isSubjectField(label) || isRefNoField(label) || isProjectNumberField(label) || isOrganizationField(label)) {
       return;
     }
     const layoutValue = (fromLayout[label] || '').trim();
@@ -59,7 +59,8 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
 }
 
 export function extractOurRefNo(pages: IOcrPageResult[]): string {
-  return extractLabeledRef(pages, ourRefWordIndex, ourRefFromText);
+  return extractLabeledRef(pages, ourRefWordIndex, ourRefFromText)
+    || extractLabeledRef(pages, plainRefWordIndex, plainRefFromText);
 }
 
 export function extractYourRefNo(pages: IOcrPageResult[]): string {
@@ -137,6 +138,57 @@ function yourRefWordIndex(words: IOcrWord[], index: number): number {
   return -1;
 }
 
+function plainRefWordIndex(words: IOcrWord[], index: number): number {
+  const key = normalizeToken(words[index].text || '');
+  if (/^ourr+e+fs?(no|number)?$/.test(key) || key === 'ourreference') {
+    return -1;
+  }
+  if (/^y(ou)?rr+e+fs?(no|number)?$/.test(key) || key === 'yourreference' || key === 'youref') {
+    return -1;
+  }
+  if (!isRefWord(key)) {
+    return -1;
+  }
+  const prev = words[index - 1];
+  const prevKey = prev ? normalizeToken(prev.text || '') : '';
+  if (prevKey === 'our' || prevKey === '0ur' || prevKey === 'ou') {
+    return -1;
+  }
+  if (prevKey === 'your' || prevKey === 'you' || prevKey === 'yr' || prevKey === 'youf' || prevKey === 'yor') {
+    return -1;
+  }
+  if (!refLabelHasColon(words, index)) {
+    return -1;
+  }
+  return index;
+}
+
+function refLabelHasColon(words: IOcrWord[], index: number): boolean {
+  if (tokenHasColon(words[index].text || '')) {
+    return true;
+  }
+  let cursor = index + 1;
+  if (words[cursor] && /^[:.-]+$/.test((words[cursor].text || '').trim())) {
+    return tokenHasColon(words[cursor].text || '');
+  }
+  const nextKey = words[cursor] ? normalizeToken(words[cursor].text || '') : '';
+  if (nextKey === 'no' || nextKey === 'number') {
+    if (tokenHasColon(words[cursor].text || '')) {
+      return true;
+    }
+    cursor++;
+    if (words[cursor] && /^[:.-]+$/.test((words[cursor].text || '').trim())) {
+      return tokenHasColon(words[cursor].text || '');
+    }
+    return tokenHasColon(words[cursor] ? words[cursor].text || '' : '');
+  }
+  return false;
+}
+
+function tokenHasColon(text: string): boolean {
+  return (text || '').indexOf(':') >= 0;
+}
+
 function isRefWord(key: string): boolean {
   return key === 'reference' ||
     key === 'refno' ||
@@ -145,13 +197,13 @@ function isRefWord(key: string): boolean {
 
 function valueAfterRef(words: IOcrWord[], index: number): string {
   let start = index + 1;
-  if (words[start] && /^[:.\-]+$/.test((words[start].text || '').trim())) {
+  if (words[start] && /^[:.-]+$/.test((words[start].text || '').trim())) {
     start++;
   }
   const nextKey = words[start] ? normalizeToken(words[start].text || '') : '';
   if (nextKey === 'no' || nextKey === 'number') {
     start++;
-    if (words[start] && /^[:.\-]+$/.test((words[start].text || '').trim())) {
+    if (words[start] && /^[:.-]+$/.test((words[start].text || '').trim())) {
       start++;
     }
   }
@@ -216,7 +268,7 @@ function isRefLabelToken(key: string): boolean {
 
 function ourRefFromText(text: string): string {
   const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
-  const pattern = /\bour\s+r+e+f(?:erence)?(?:\s*no(?:\.)?)?\s*[:.\-]?\s*(.+)$/i;
+  const pattern = /\bour\s+r+e+f(?:erence)?(?:\s*no(?:\.)?)?\s*[:.-]?\s*(.+)$/i;
   for (let index = 0; index < lines.length; index++) {
     const match = lines[index].match(pattern);
     if (!match) {
@@ -233,9 +285,32 @@ function ourRefFromText(text: string): string {
   return '';
 }
 
+function plainRefFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  const pattern = /\br+e+f(?:erence)?(?:\s*no(?:\.)?)?\s*:\s*(.+)$/i;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (/\b(?:our|your?|yr)\s+r+e+f/i.test(line)) {
+      continue;
+    }
+    const match = line.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const value = (match[1] || '')
+      .replace(/\b(our\s+r+e+f|your\s+r+e+f|date|tel|fax|email)\b.*$/i, '')
+      .replace(/^[:.\s-]+/, '')
+      .trim();
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+}
+
 function yourRefFromText(text: string): string {
   const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
-  const pattern = /\b(?:your?|yr)\s+r+e+f(?:erence)?(?:\s*no(?:\.)?)?\s*[:.\-]?\s*(.+)$/i;
+  const pattern = /\b(?:your?|yr)\s+r+e+f(?:erence)?(?:\s*no(?:\.)?)?\s*[:.-]?\s*(.+)$/i;
   for (let index = 0; index < lines.length; index++) {
     const match = lines[index].match(pattern);
     if (!match) {
