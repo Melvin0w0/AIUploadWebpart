@@ -1,0 +1,36 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-web-part-manifest.schema.json",
+  "id": "03e59196-93e7-4903-9347-c59c952094d6",
+  "alias": "AiUploadWebPart",
+  "componentType": "WebPart",
+
+  // The "*" signifies that the version should be taken from the package.json
+  "version": "*",
+  "manifestVersion": 2,
+
+  // If true, the component can only be installed on sites where Custom Script is allowed.
+  // Components that allow authors to embed arbitrary script code should set this to true.
+  // https://support.office.com/en-us/article/Turn-scripting-capabilities-on-or-off-1f2c515f-5d7e-448a-9fd7-835da935584f
+  "requiresCustomScript": false,
+  "supportedHosts": ["SharePointWebPart", "TeamsPersonalApp", "TeamsTab", "SharePointFullPage"],
+  "supportsThemeVariants": true,
+
+  "preconfiguredEntries": [
+    {
+      "groupId": "5c03119e-3074-46fd-976b-c60198311f70", // Advanced
+      "group": { "default": "Advanced" },
+      "title": { "default": "AI Upload" },
+      "description": { "default": "Upload a scanned PDF, run OCR, and display the extracted text." },
+      "officeFabricIconFontName": "PDF",
+      "properties": {
+        "formFields": "Name\nRegistration Number\nLeading BL\nProject Number\nSub-Project Number\nOrganization\nSender\nReceiver\nSubject\nFile No\nRef No\nIssue Date\nAttachment\nScan\nRemark\nLocation\ncc to AECOM",
+        "azureOpenAiEndpoint": "",
+        "azureOpenAiApiKey": "",
+        "azureOpenAiDeployment": "",
+        "azureOpenAiApiVersion": "2024-08-01-preview",
+        "libraryName": "Project Documents",
+        "folderPathTemplate": "{Project Number}"
+      }
+    }
+  ]
+}

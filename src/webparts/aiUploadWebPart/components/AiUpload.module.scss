@@ -1,0 +1,179 @@
+@import '~@fluentui/react/dist/sass/References.scss';
+
+.aiUpload {
+  overflow: hidden;
+  width: 100%;
+  padding: 1em;
+  color: "[theme:bodyText, default: #323130]";
+  color: var(--bodyText);
+
+  &.teams {
+    font-family: $ms-font-family-fallbacks;
+  }
+}
+
+.title {
+  font-weight: 600;
+  color: "[theme:bodyText, default: #323130]";
+  color: var(--bodyText);
+}
+
+.subtitle {
+  color: "[theme:bodySubtext, default: #605e5c]";
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.results {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid "[theme:neutralLight, default: #edebe9]";
+  border-radius: 4px;
+  background: "[theme:white, default: #ffffff]";
+  overflow: hidden;
+}
+
+.paneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid "[theme:neutralLight, default: #edebe9]";
+  background: "[theme:neutralLighterAlt, default: #faf9f8]";
+}
+
+.paneTitle {
+  font-weight: 600;
+}
+
+.paneBody {
+  flex: 1;
+  min-height: 280px;
+}
+
+.fieldsBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.hint {
+  color: "[theme:bodySubtext, default: #605e5c]";
+}
+
+.fieldCard {
+  padding: 4px 8px;
+  border: 1px solid "[theme:neutralLight, default: #edebe9]";
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.fieldCardActive {
+  border-color: "[theme:themePrimary, default: #03787c]";
+  background: "[theme:themeLighterAlt, default: #f3f9f9]";
+}
+
+.fieldCardMissing {
+  border-color: "[theme:errorText, default: #a4262c]";
+  background: "[theme:errorBackground, default: #fde7e9]";
+}
+
+.fieldInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.textField {
+  height: 100%;
+}
+
+.pdfViewer {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: auto;
+  min-height: 480px;
+  padding: 16px;
+  background: "[theme:neutralSecondary, default: #605e5c]";
+  user-select: none;
+}
+
+.pageStage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  cursor: text;
+}
+
+.pageImage {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+
+.highlightOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.wordHit {
+  fill: transparent;
+}
+
+.wordSelected {
+  fill: rgba(255, 213, 0, 0.42);
+  stroke: rgba(201, 151, 0, 0.9);
+  stroke-width: 1;
+}
+
+.dragRect {
+  fill: rgba(0, 120, 212, 0.18);
+  stroke: rgba(0, 120, 212, 0.9);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 480px;
+  padding: 24px;
+  text-align: center;
+  color: "[theme:bodySubtext, default: #605e5c]";
+}
+
+.uploadBar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid "[theme:neutralLight, default: #edebe9]";
+}
+
+.destination {
+  word-break: break-all;
+  color: "[theme:bodyText, default: #323130]";
+}
+
+@media (max-width: 900px) {
+  .results {
+    grid-template-columns: 1fr;
+  }
+}

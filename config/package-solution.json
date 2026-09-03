@@ -1,0 +1,40 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
+  "solution": {
+    "name": "ai-upload-client-side-solution",
+    "id": "0c2801f5-7958-4f0a-b143-40316c846575",
+    "version": "1.0.0.0",
+    "includeClientSideAssets": true,
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "developer": {
+      "name": "",
+      "websiteUrl": "",
+      "privacyUrl": "",
+      "termsOfUseUrl": "",
+      "mpnId": "Undefined-1.22.2"
+    },
+    "metadata": {
+      "shortDescription": {
+        "default": "Upload a scanned PDF, run OCR, and display extracted text"
+      },
+      "longDescription": {
+        "default": "Upload a scanned PDF, run OCR, and display extracted text"
+      },
+      "screenshotPaths": [],
+      "videoUrl": "",
+      "categories": []
+    },
+    "features": [
+      {
+        "title": "ai-upload Feature",
+        "description": "The feature that activates elements of the ai-upload solution.",
+        "id": "d0b00576-91ee-460b-b7c7-cff24a15daa4",
+        "version": "1.0.0.0"
+      }
+    ]
+  },
+  "paths": {
+    "zippedPackage": "solution/ai-upload.sppkg"
+  }
+}
