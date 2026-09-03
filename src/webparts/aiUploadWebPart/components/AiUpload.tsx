@@ -1,11 +1,13 @@
 import * as React from 'react';
 import {
+  ChoiceGroup,
   DatePicker,
   DayOfWeek,
   DefaultButton,
   defaultDatePickerStrings,
   Dropdown,
   IconButton,
+  IChoiceGroupOption,
   IDropdownOption,
   Label,
   Link,
@@ -50,6 +52,12 @@ import {
   parseIssueDate,
   sanitizeIssueDate
 } from '../constants/issueDate';
+import {
+  canonicalYesNo,
+  isYesNoChoiceField,
+  YES_NO_OPTIONS,
+  YES_VALUE
+} from '../constants/yesNo';
 import { extractFieldValues, extractOurRefNo, extractYourRefNo } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
 import { analyzeSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
@@ -89,12 +97,17 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _fileInput: React.RefObject<HTMLInputElement>;
   private _nextFieldId: number;
   private _originalPdfBytes: Uint8Array | undefined;
+  private _calendarOpen: boolean;
+  private _calendarObserver: MutationObserver | undefined;
+  private _originalFocus: ((this: HTMLElement, options?: FocusOptions) => void) | undefined;
+  private _focusPatchTimer: number | undefined;
 
   public constructor(props: IAiUploadProps) {
     super(props);
     this._fileInput = React.createRef<HTMLInputElement>();
     this._nextFieldId = 1;
     this._originalPdfBytes = undefined;
+    this._calendarOpen = false;
     const fields = this._fieldsFromConfig(props.formFields);
     this.state = {
       file: undefined,
@@ -116,6 +129,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     };
   }
 
+  public componentDidMount(): void {
+    document.addEventListener('mousedown', this._onDocumentMouseDownCapture, true);
+    document.addEventListener('click', this._onDocumentClickCapture, true);
+    document.addEventListener('submit', this._onDocumentSubmitCapture, true);
+  }
+
   public componentDidUpdate(prevProps: IAiUploadProps): void {
     if (prevProps.formFields !== this.props.formFields) {
       const fields = this._fieldsFromConfig(this.props.formFields, this.state.fields);
@@ -127,6 +146,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   }
 
   public componentWillUnmount(): void {
+    document.removeEventListener('mousedown', this._onDocumentMouseDownCapture, true);
+    document.removeEventListener('click', this._onDocumentClickCapture, true);
+    document.removeEventListener('submit', this._onDocumentSubmitCapture, true);
+    this._stopCalendarObserver();
+    this._disablePreventScrollFocus();
     this._revokePageUrls(this.state.pages);
   }
 
@@ -309,6 +333,23 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
                         />
+                      ) : isYesNoChoiceField(field.label) ? (
+                        <ChoiceGroup
+                          label={field.label}
+                          selectedKey={canonicalYesNo(field.value) || YES_VALUE}
+                          options={this._yesNoOptions()}
+                          onChange={(_event, option) => this._onFieldValueChange(field.id, option ? String(option.key) : YES_VALUE)}
+                          onFocus={() => this._setActiveField(field.id)}
+                          required={isRequiredField(field.label)}
+                          className={styles.yesNoGroup}
+                          styles={{
+                            flexContainer: {
+                              display: 'flex',
+                              flexDirection: 'row',
+                              columnGap: '16px'
+                            }
+                          }}
+                        />
                       ) : isIssueDateField(field.label) ? (
                         <Stack className={styles.fieldInput}>
                           <Label>{ISSUE_DATE_DISPLAY_LABEL}</Label>
@@ -319,13 +360,24 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                             parseDateFromString={(text) => parseIssueDate(text) || null}
                             placeholder={strings.IssueDatePlaceholder || 'dd/MM/yyyy'}
                             allowTextInput={true}
+                            disableAutoFocus={true}
                             firstDayOfWeek={DayOfWeek.Monday}
                             strings={defaultDatePickerStrings}
                             isRequired={isRequiredField(field.label)}
                             ariaLabel={ISSUE_DATE_DISPLAY_LABEL}
+                            isMonthPickerVisible={false}
+                            calendarProps={{
+                              showGoToToday: false
+                            }}
                             calloutProps={{
                               setInitialFocus: false,
-                              onClick: (event) => event.preventDefault()
+                              preventDismissOnResize: true,
+                              onMouseDown: (event) => this._patchCalendarButtons(event.currentTarget),
+                              onClick: (event) => event.preventDefault(),
+                              layerProps: {
+                                onLayerDidMount: this._onCalendarLayerMount,
+                                onLayerWillUnmount: this._onCalendarLayerUnmount
+                              }
                             }}
                             textField={{
                               description: strings.IssueDateDescription || 'Date format: dd/MM/yyyy',
@@ -370,7 +422,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           className={styles.fieldInput}
                         />
                       )}
-                      {!isRegistrationNumberField(field.label) && (
+                      {!isRegistrationNumberField(field.label) && !isYesNoChoiceField(field.label) && (
                       <IconButton
                         iconProps={{ iconName: 'Clear' }}
                         title={strings.ClearField}
@@ -484,6 +536,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     return fields.length > 0 ? fields[0].id : undefined;
   };
 
+  private _defaultFieldValue = (label: string): string => {
+    if (isSubProjectNumberField(label)) {
+      return SUB_PROJECT_NONE;
+    }
+    if (isYesNoChoiceField(label)) {
+      return YES_VALUE;
+    }
+    return '';
+  };
+
   private _fieldsFromConfig = (config: string, existing?: IFormField[]): IFormField[] => {
     const labels = (config || '')
       .split(/\r?\n/)
@@ -497,7 +559,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     return this._syncRegistrationFromName(names.map((label) => ({
       id: `field-${this._nextFieldId++}`,
       label,
-      value: valuesByLabel.get(label) || (isSubProjectNumberField(label) ? SUB_PROJECT_NONE : '')
+      value: valuesByLabel.get(label) || this._defaultFieldValue(label)
     })));
   };
 
@@ -505,16 +567,108 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this.setState({ activeFieldId: fieldId, error: undefined });
   };
 
-  private _onIssueDateSelect = (fieldId: string, date: Date | null | undefined): void => {
-    const scrollX = window.scrollX || window.pageXOffset;
-    const scrollY = window.scrollY || window.pageYOffset;
-    this._onFieldValueChange(fieldId, date ? formatIssueDate(date) : '');
-    const restoreScroll = (): void => {
-      window.scrollTo(scrollX, scrollY);
+  private _isCalendarElement = (node: EventTarget | null): boolean => {
+    if (!node || !(node instanceof Element)) {
+      return false;
+    }
+    return !!node.closest('.ms-DatePicker-callout, .ms-Calendar, .ms-DatePicker');
+  };
+
+  private _patchCalendarButtons = (root?: ParentNode | null): void => {
+    const scope = root || document;
+    const buttons = scope.querySelectorAll('.ms-DatePicker-callout button, .ms-Calendar button');
+    for (let i = 0; i < buttons.length; i++) {
+      (buttons[i] as HTMLButtonElement).type = 'button';
+    }
+  };
+
+  private _startCalendarObserver = (): void => {
+    this._stopCalendarObserver();
+    if (typeof MutationObserver === 'undefined') {
+      return;
+    }
+    this._calendarObserver = new MutationObserver(() => {
+      this._patchCalendarButtons();
+    });
+    this._calendarObserver.observe(document.body, { childList: true, subtree: true });
+    this._patchCalendarButtons();
+  };
+
+  private _stopCalendarObserver = (): void => {
+    if (this._calendarObserver) {
+      this._calendarObserver.disconnect();
+      this._calendarObserver = undefined;
+    }
+  };
+
+  private _enablePreventScrollFocus = (): void => {
+    if (this._originalFocus) {
+      return;
+    }
+    this._originalFocus = HTMLElement.prototype.focus;
+    const original = this._originalFocus;
+    HTMLElement.prototype.focus = function (this: HTMLElement, options?: FocusOptions): void {
+      original.call(this, { ...(options || {}), preventScroll: true });
     };
-    restoreScroll();
-    window.requestAnimationFrame(restoreScroll);
-    window.setTimeout(restoreScroll, 0);
+  };
+
+  private _disablePreventScrollFocus = (): void => {
+    if (this._focusPatchTimer !== undefined) {
+      window.clearTimeout(this._focusPatchTimer);
+      this._focusPatchTimer = undefined;
+    }
+    if (this._originalFocus) {
+      HTMLElement.prototype.focus = this._originalFocus;
+      this._originalFocus = undefined;
+    }
+  };
+
+  private _onCalendarLayerMount = (): void => {
+    this._calendarOpen = true;
+    this._enablePreventScrollFocus();
+    this._startCalendarObserver();
+  };
+
+  private _onCalendarLayerUnmount = (): void => {
+    this._calendarOpen = false;
+    this._stopCalendarObserver();
+    this._focusPatchTimer = window.setTimeout(() => {
+      this._disablePreventScrollFocus();
+    }, 300);
+  };
+
+  private _onDocumentMouseDownCapture = (event: MouseEvent): void => {
+    if (!this._isCalendarElement(event.target)) {
+      return;
+    }
+    const button = (event.target as HTMLElement).closest('button');
+    if (button) {
+      (button as HTMLButtonElement).type = 'button';
+    }
+    this._patchCalendarButtons((event.target as HTMLElement).closest('.ms-DatePicker-callout, .ms-Calendar'));
+  };
+
+  private _onDocumentClickCapture = (event: MouseEvent): void => {
+    if (!this._isCalendarElement(event.target)) {
+      return;
+    }
+    const button = (event.target as HTMLElement).closest('button');
+    if (button) {
+      (button as HTMLButtonElement).type = 'button';
+    }
+  };
+
+  private _onDocumentSubmitCapture = (event: Event): void => {
+    if (!this._calendarOpen && !this._isCalendarElement(document.activeElement) && !this._isCalendarElement(event.target)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  private _onIssueDateSelect = (fieldId: string, date: Date | null | undefined): void => {
+    this._enablePreventScrollFocus();
+    this._onFieldValueChange(fieldId, date ? formatIssueDate(date) : '');
   };
 
   private _onFieldValueChange = (fieldId: string, value: string): void => {
@@ -581,6 +735,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (isIssueDateField(label)) {
       return sanitizeIssueDate(value);
     }
+    if (isYesNoChoiceField(label)) {
+      return canonicalYesNo(value);
+    }
     return value;
   };
 
@@ -632,6 +789,13 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fields: this._syncRegistrationFromName(prev.fields.map((field) => field.id === targetId ? { ...field, value } : field)),
       activeFieldId: targetId,
       error: undefined
+    }));
+  };
+
+  private _yesNoOptions = (): IChoiceGroupOption[] => {
+    return YES_NO_OPTIONS.map((name) => ({
+      key: name,
+      text: name
     }));
   };
 
@@ -1076,7 +1240,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       pages: [],
       currentPage: 1,
       selectedWordIndexes: [],
-      fields: this.state.fields.map((field) => ({ ...field, value: '' })),
+      fields: this.state.fields.map((field) => ({ ...field, value: this._defaultFieldValue(field.label) })),
       error: undefined,
       info: undefined,
       success: undefined,

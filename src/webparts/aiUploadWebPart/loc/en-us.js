@@ -47,6 +47,7 @@ define([], function () {
     IssueDateLabel: 'Issue Date (dd/MM/yyyy)',
     IssueDatePlaceholder: 'dd/MM/yyyy',
     IssueDateDescription: 'Date format: dd/MM/yyyy',
+    YesNoPlaceholder: 'Yes / No',
     UploadInvalidProjectNumber: 'Project Number must be 1 to 8 digits.',
     UploadNeedFile: 'Choose a PDF before uploading.',
     UploadMissingFields: 'Fill these required fields before uploading: {0}',

@@ -164,11 +164,11 @@ function buildUserPrompt(
     'File No: file number',
     'Ref No: copy the value to the right of Our Ref: / Our Ref :. If there is no Our Ref, copy the value to the right of a standalone Ref: / Ref :. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
     'Issue Date: the document date in dd/MM/yyyy, for example 03/09/2026.',
-    'Attachment: attachments mentioned',
-    'Scan: scan number or scan mark',
+    'Attachment: Yes if the letter mentions attachments or enclosures, otherwise No. Reply only Yes or No.',
+    'Scan: Yes if the document is a scan or has a scan mark, otherwise No. Reply only Yes or No.',
     'Remark: remarks or notes',
     'Location: office, site, or city',
-    'cc to AECOM: CC line if AECOM is copied'
+    'cc to AECOM: Yes if AECOM is copied, otherwise No. Reply only Yes or No.'
   ].join('\n');
 
   const sourceLines = hasImage
