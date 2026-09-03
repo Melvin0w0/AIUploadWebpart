@@ -625,6 +625,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
   private _onCalendarLayerMount = (): void => {
     this._calendarOpen = true;
+    if (this._focusPatchTimer !== undefined) {
+      window.clearTimeout(this._focusPatchTimer);
+      this._focusPatchTimer = undefined;
+    }
     this._enablePreventScrollFocus();
     this._startCalendarObserver();
   };
@@ -633,7 +637,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._calendarOpen = false;
     this._stopCalendarObserver();
     this._focusPatchTimer = window.setTimeout(() => {
-      this._disablePreventScrollFocus();
+      this._focusPatchTimer = undefined;
+      if (!this._calendarOpen) {
+        this._disablePreventScrollFocus();
+      }
     }, 300);
   };
 
