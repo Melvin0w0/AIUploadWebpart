@@ -6,27 +6,13 @@ import { isYesNoChoiceField } from '../constants/yesNo';
 
 const STORAGE_KEY: string = 'aiUpload.fieldHistory.v1';
 const MAX_VALUES: number = 12;
-const MAX_RECORDS: number = 8;
-
-export interface IHistoryField {
-  label: string;
-  value: string;
-}
-
-export interface IHistoryRecord {
-  id: string;
-  savedAt: number;
-  summary: string;
-  fields: IHistoryField[];
-}
 
 export interface IFieldHistory {
   values: { [label: string]: string[] };
-  records: IHistoryRecord[];
 }
 
 export function emptyFieldHistory(): IFieldHistory {
-  return { values: {}, records: [] };
+  return { values: {} };
 }
 
 export function loadFieldHistory(): IFieldHistory {
@@ -38,10 +24,9 @@ export function loadFieldHistory(): IFieldHistory {
     if (!raw) {
       return emptyFieldHistory();
     }
-    const parsed = JSON.parse(raw) as IFieldHistory;
+    const parsed = JSON.parse(raw) as { values?: { [label: string]: string[] } };
     return {
-      values: parsed && parsed.values ? parsed.values : {},
-      records: parsed && parsed.records ? parsed.records : []
+      values: parsed && parsed.values ? parsed.values : {}
     };
   } catch {
     return emptyFieldHistory();
@@ -77,35 +62,19 @@ export function rememberFieldValue(history: IFieldHistory, label: string, value:
     values: {
       ...history.values,
       [label]: next.slice(0, MAX_VALUES)
-    },
-    records: history.records
+    }
   };
 }
 
-export function rememberRecord(history: IFieldHistory, fields: IHistoryField[]): IFieldHistory {
-  const savedFields = fields
-    .map((field) => ({ label: field.label, value: (field.value || '').replace(/\s+/g, ' ').trim() }))
-    .filter((field) => field.value.length > 0);
-  if (savedFields.length === 0) {
-    return history;
-  }
-
+export function rememberFieldValues(
+  history: IFieldHistory,
+  fields: { label: string; value: string }[]
+): IFieldHistory {
   let next = history;
-  savedFields.forEach((field) => {
+  fields.forEach((field) => {
     next = rememberFieldValue(next, field.label, field.value);
   });
-
-  const record: IHistoryRecord = {
-    id: `record-${Date.now()}`,
-    savedAt: Date.now(),
-    summary: recordSummary(savedFields),
-    fields: savedFields
-  };
-  const records = [record].concat(next.records).slice(0, MAX_RECORDS);
-  return {
-    values: next.values,
-    records
-  };
+  return next;
 }
 
 export function saveFieldHistory(history: IFieldHistory): void {
@@ -117,22 +86,4 @@ export function saveFieldHistory(history: IFieldHistory): void {
   } catch {
     // Ignore quota / private mode.
   }
-}
-
-function recordSummary(fields: IHistoryField[]): string {
-  const get = (label: string): string => {
-    const match = fields.filter((field) => field.label.toLowerCase() === label.toLowerCase())[0];
-    return match ? match.value : '';
-  };
-  const parts = [get('Name') || get('Ref No'), get('Organization'), get('Issue Date')]
-    .filter((part) => part.length > 0);
-  if (parts.length === 0) {
-    return savedFieldsFallback(fields);
-  }
-  return parts.join(' · ');
-}
-
-function savedFieldsFallback(fields: IHistoryField[]): string {
-  const first = fields.filter((field) => field.value)[0];
-  return first ? first.value : 'Saved record';
 }

@@ -156,6 +156,10 @@ export function trimSlash(value: string): string {
   return (value || '').replace(/\/+$/, '');
 }
 
+export function buildUploadFolderUrl(destination: IResolvedUploadDestination): string {
+  return buildUploadFileUrl(destination, '');
+}
+
 export function buildUploadFileUrl(destination: IResolvedUploadDestination, uploadFileName: string): string {
   if (!destination.siteUrl) {
     return '';

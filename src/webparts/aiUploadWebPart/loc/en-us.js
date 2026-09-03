@@ -41,7 +41,7 @@ define([], function () {
     UploadDestinationPending: 'Select Leading BL to choose the destination site',
     LeadingBlPlaceholder: 'Select a business line',
     ProjectNumberPlaceholder: 'Up to 8 digits',
-    ProjectNumberDescription: 'Digits only, maximum 8.',
+    ProjectNumberDescription: 'From Our Ref, 8 digits before /.',
     RegistrationNumberPlaceholder: 'Copied from Name',
     RegistrationNumberDescription: 'Same as Name. This field is read only.',
     IssueDateLabel: 'Issue Date (dd/MM/yyyy)',
@@ -64,6 +64,7 @@ define([], function () {
     UploadSucceeded: 'Uploaded {0}.',
     UploadFailed: 'Upload failed.',
     OpenUploadedFile: 'Open file',
+    OpenUploadedFolder: 'Open folder',
     AddFieldButton: 'Add field',
     DefaultFieldLabel: 'Field {0}',
     FieldPlaceholder: 'Highlight PDF text to fill this box',
@@ -92,8 +93,11 @@ define([], function () {
     LanguageSimplifiedChinese: 'Simplified Chinese',
     LanguageEnglishTraditionalChinese: 'English + Traditional Chinese',
     LanguageEnglishSimplifiedChinese: 'English + Simplified Chinese',
-    RecentRecordsLabel: 'Recent records',
-    RecentValuesLabel: 'Recent'
+    RecentValuesLabel: 'Recent',
+    IncomingLabel: 'Incoming',
+    OutgoingLabel: 'Outgoing',
+    IncomingNoAutoFillHint: 'Incoming files are not auto-filled. Enter fields manually or highlight the PDF.',
+    NotificationSetupThresholdHint: 'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).'
     // loc bundle
   };
 });

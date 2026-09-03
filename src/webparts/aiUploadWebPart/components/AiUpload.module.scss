@@ -199,6 +199,32 @@
   white-space: nowrap;
 }
 
+.fileNameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kindBadge {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 980px;
+  font-size: 11px;
+  font-weight: 590;
+  letter-spacing: 0.01em;
+}
+
+.kindIncoming {
+  background: rgba(0, 122, 255, 0.12);
+  color: #007aff;
+}
+
+.kindOutgoing {
+  background: rgba(52, 199, 89, 0.16);
+  color: #248a3d;
+}
+
 .hiddenFileInput {
   display: none;
 }
@@ -302,6 +328,57 @@
 
 .bannerSuccess {
   background: rgba(52, 199, 89, 0.14);
+}
+
+.bannerBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bannerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.appleBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 980px;
+  background: #007aff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 160ms ease;
+}
+
+.appleBtn:hover {
+  background: #0066d6;
+  color: #fff;
+  text-decoration: none;
+}
+
+.appleBtn:active {
+  transform: scale(0.96);
+}
+
+.appleBtnSecondary {
+  background: #ffffff;
+  color: #1d1d1f !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.appleBtnSecondary:hover {
+  background: #f2f2f7;
+  color: #1d1d1f !important;
 }
 
 .bannerWarning {
@@ -596,50 +673,6 @@
   background: var(--apple-fill);
 }
 
-.recentBar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 4px 8px;
-}
-
-.recentLabel {
-  font-size: 12px;
-  font-weight: 590;
-  color: var(--apple-tertiary);
-}
-
-.recentChips {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-
-.recentChip {
-  appearance: none;
-  flex: 0 0 auto;
-  max-width: 240px;
-  border: none;
-  background: var(--apple-fill);
-  color: var(--apple-text);
-  padding: 8px 12px;
-  border-radius: 980px;
-  font-size: 13px;
-  font-weight: 510;
-  line-height: 1.3;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms ease;
-}
-
-.recentChip:hover {
-  background: var(--apple-fill-pressed);
-  transform: translateY(-1px);
-}
-
 @keyframes historyIn {
   from {
     opacity: 0;
@@ -723,7 +756,6 @@
   .fieldCard,
   .segmentThumb,
   .segment,
-  .recentChip,
   .datePicker :global(.ms-TextField-fieldGroup) {
     transition: none;
   }

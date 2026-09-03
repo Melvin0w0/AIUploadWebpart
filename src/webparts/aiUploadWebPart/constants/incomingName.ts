@@ -20,6 +20,22 @@ export function isOutgoingName(value: string): boolean {
   return /^[A-Za-z]$/.test(text.charAt(10));
 }
 
+export type CorrespondenceKind = 'incoming' | 'outgoing' | 'unknown';
+
+export function correspondenceKindFromName(value: string): CorrespondenceKind {
+  if (isIncomingName(value)) {
+    return 'incoming';
+  }
+  if (isOutgoingName(value)) {
+    return 'outgoing';
+  }
+  return 'unknown';
+}
+
+export function correspondenceKindFromFileName(fileName: string): CorrespondenceKind {
+  return correspondenceKindFromName(nameFromPdfFile(fileName));
+}
+
 function nameText(value: string, length: number): string {
   const trimmed = (value || '').trim();
   const compact = trimmed.replace(/\s+/g, '');

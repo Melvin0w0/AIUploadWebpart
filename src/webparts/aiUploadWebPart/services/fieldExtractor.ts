@@ -58,8 +58,12 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
   return values;
 }
 
+export function extractOurRefOnly(pages: IOcrPageResult[]): string {
+  return extractLabeledRef(pages, ourRefWordIndex, ourRefFromText);
+}
+
 export function extractOurRefNo(pages: IOcrPageResult[]): string {
-  return extractLabeledRef(pages, ourRefWordIndex, ourRefFromText)
+  return extractOurRefOnly(pages)
     || extractLabeledRef(pages, plainRefWordIndex, plainRefFromText);
 }
 

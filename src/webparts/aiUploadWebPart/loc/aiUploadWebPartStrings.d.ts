@@ -63,6 +63,7 @@ declare interface IAiUploadWebPartStrings {
   UploadSucceeded: string;
   UploadFailed: string;
   OpenUploadedFile: string;
+  OpenUploadedFolder: string;
   AddFieldButton: string;
   DefaultFieldLabel: string;
   FieldPlaceholder: string;
@@ -91,8 +92,11 @@ declare interface IAiUploadWebPartStrings {
   LanguageSimplifiedChinese: string;
   LanguageEnglishTraditionalChinese: string;
   LanguageEnglishSimplifiedChinese: string;
-  RecentRecordsLabel: string;
   RecentValuesLabel: string;
+  IncomingLabel: string;
+  OutgoingLabel: string;
+  IncomingNoAutoFillHint: string;
+  NotificationSetupThresholdHint: string;
 }
 
 declare module 'AiUploadWebPartStrings' {

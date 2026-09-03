@@ -13,8 +13,8 @@ export function isValidProjectNumber(value: string): boolean {
   return /^\d{1,8}$/.test((value || '').trim());
 }
 
-export function projectNumberFromYourRef(yourRef: string): string {
-  const source = (yourRef || '').trim();
+export function projectNumberFromRef(refValue: string): string {
+  const source = (refValue || '').trim();
   if (!source) {
     return '';
   }

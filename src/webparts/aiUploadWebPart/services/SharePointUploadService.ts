@@ -94,7 +94,7 @@ export class SharePointUploadService {
     return {
       fileName,
       fileUrl: payload.LinkingUri || `${origin}${serverRelativeUrl}`,
-      folderUrl: `${origin}${folderServerRelativeUrl}`,
+      folderUrl: buildLibraryFolderUrl(origin, libraryRoot, folderServerRelativeUrl),
       metadataError
     };
   }
@@ -403,6 +403,14 @@ function trimEnd(value: string, char: string): string {
 function siteOrigin(siteUrl: string): string {
   const match = siteUrl.match(/^https?:\/\/[^/]+/i);
   return match ? match[0] : siteUrl;
+}
+
+function buildLibraryFolderUrl(origin: string, libraryRoot: string, folderServerRelativeUrl: string): string {
+  const encodedRoot = (libraryRoot || '')
+    .split('/')
+    .map((segment) => segment ? encodeURIComponent(segment) : '')
+    .join('/');
+  return `${origin}${encodedRoot}/Forms/AllItems.aspx?id=${encodeURIComponent(folderServerRelativeUrl || libraryRoot)}`;
 }
 
 async function readSharePointError(response: SPHttpClientResponse, fallback: string): Promise<string> {

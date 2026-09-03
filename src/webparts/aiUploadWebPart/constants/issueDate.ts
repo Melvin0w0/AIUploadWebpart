@@ -31,7 +31,7 @@ export function parseIssueDate(value: string): Date | undefined {
     return validDate(parseInt(iso[1], 10), parseInt(iso[2], 10), parseInt(iso[3], 10));
   }
 
-  const dmy = trimmed.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})$/);
+  const dmy = trimmed.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
   if (dmy) {
     let year = parseInt(dmy[3], 10);
     if (year < 100) {

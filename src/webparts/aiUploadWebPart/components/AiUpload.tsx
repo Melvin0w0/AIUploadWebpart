@@ -21,7 +21,7 @@ import { PdfOcrService } from '../services/PdfOcrService';
 import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
 import PdfHighlightViewer from './PdfHighlightViewer';
 import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
-import { nameFromPdfFile } from '../constants/incomingName';
+import { correspondenceKindFromFileName, nameFromPdfFile } from '../constants/incomingName';
 import {
   canonicalLeadingBl,
   isLeadingBlField,
@@ -30,7 +30,7 @@ import {
 import {
   isProjectNumberField,
   isValidProjectNumber,
-  projectNumberFromYourRef,
+  projectNumberFromRef,
   sanitizeProjectNumber
 } from '../constants/projectNumber';
 import {
@@ -53,24 +53,25 @@ import {
   YES_NO_OPTIONS,
   YES_VALUE
 } from '../constants/yesNo';
-import { extractFieldValues, extractOurRefNo, extractYourRefNo } from '../services/fieldExtractor';
+import { extractFieldValues, extractOurRefNo, extractOurRefOnly } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
 import { analyzeSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
 import { SharePointUploadService } from '../services/SharePointUploadService';
 import {
-  buildUploadFileUrl,
+  buildUploadFolderUrl,
   fileNameFromFields,
   resolveUploadDestination
 } from '../services/uploadDestination';
 import {
   rememberFieldValue,
-  rememberRecord,
+  rememberFieldValues,
   isHistoryTextField,
   loadFieldHistory,
   saveFieldHistory,
   suggestionsFor,
   IFieldHistory
 } from '../services/fieldHistory';
+import { lookupLeadingBlFromNotificationSetup } from '../services/notificationSetup';
 
 interface IFormField {
   id: string;
@@ -91,6 +92,7 @@ interface IAiUploadState {
   info: string | undefined;
   success: string | undefined;
   successUrl: string | undefined;
+  successFolderUrl: string | undefined;
   warning: string | undefined;
   isUploading: boolean;
   uploadStatus: string | undefined;
@@ -108,6 +110,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _originalFocus: ((this: HTMLElement, options?: FocusOptions) => void) | undefined;
   private _focusPatchTimer: number | undefined;
   private _historyCloseTimer: number | undefined;
+  private _leadingBlLookupSeq: number = 0;
+  private _leadingBlLookupTimer: number | undefined;
 
   public constructor(props: IAiUploadProps) {
     super(props);
@@ -115,6 +119,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._nextFieldId = 1;
     this._originalPdfBytes = undefined;
     this._calendarOpen = false;
+    this._leadingBlLookupSeq = 0;
+    this._leadingBlLookupTimer = undefined;
     const fields = this._fieldsFromConfig(props.formFields);
     this.state = {
       file: undefined,
@@ -129,6 +135,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       info: undefined,
       success: undefined,
       successUrl: undefined,
+      successFolderUrl: undefined,
       warning: undefined,
       isUploading: false,
       uploadStatus: undefined,
@@ -163,6 +170,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (this._historyCloseTimer !== undefined) {
       window.clearTimeout(this._historyCloseTimer);
     }
+    if (this._leadingBlLookupTimer !== undefined) {
+      window.clearTimeout(this._leadingBlLookupTimer);
+    }
+    this._leadingBlLookupSeq = this._leadingBlLookupSeq + 1;
     this._revokePageUrls(this.state.pages);
   }
 
@@ -181,11 +192,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       info,
       success,
       successUrl,
+      successFolderUrl,
       warning,
       isUploading,
       uploadStatus,
       showRequiredErrors,
-      history,
       historyFieldId
     } = this.state;
     const busy = isProcessing || isUploading;
@@ -200,11 +211,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       libraryName: this.props.libraryName,
       folderPathTemplate: this.props.folderPathTemplate
     });
-    const uploadFileName = file ? fileNameFromFields(file, fields) : '';
-    const destinationUrl = buildUploadFileUrl(destination, uploadFileName);
+    const destinationUrl = buildUploadFolderUrl(destination);
     const destinationLabel = !destination.siteUrl
       ? strings.UploadDestinationPending
       : destinationUrl;
+    const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
 
     return (
       <section className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''}`}>
@@ -219,20 +230,44 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           locFormat(strings.RequiredFieldsPrompt, 'Please fill the required fields: {0}', requiredMissing.join(', '))
         )}
         {info && this._renderBanner('info', info, this._clearInfo)}
-        {success && this._renderBanner(
-          'success',
-          (
-            <span>
-              {success}
-              {successUrl && (
-                <span>
-                  {' '}
-                  <Link href={successUrl} target="_blank">{strings.OpenUploadedFile}</Link>
-                </span>
+        {success && (
+          <div className={`${styles.banner} ${styles.bannerSuccess}`} role="status">
+            <div className={styles.bannerBody}>
+              <div className={styles.bannerText}>{success}</div>
+              {(successUrl || successFolderUrl) && (
+                <div className={styles.bannerActions}>
+                  {successUrl && (
+                    <a
+                      className={styles.appleBtn}
+                      href={successUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {strings.OpenUploadedFile || 'Open file'}
+                    </a>
+                  )}
+                  {successFolderUrl && (
+                    <a
+                      className={`${styles.appleBtn} ${styles.appleBtnSecondary}`}
+                      href={successFolderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {strings.OpenUploadedFolder || 'Open folder'}
+                    </a>
+                  )}
+                </div>
               )}
-            </span>
-          ),
-          this._clearSuccess
+            </div>
+            <button
+              type="button"
+              className={styles.bannerDismiss}
+              onClick={this._clearSuccess}
+              aria-label={strings.Dismiss}
+            >
+              ×
+            </button>
+          </div>
         )}
         {warning && this._renderBanner('warning', warning, this._clearWarning)}
 
@@ -247,7 +282,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           />
           <div className={styles.fileMeta}>
             <span className={styles.fileLabel}>{strings.SelectPdfLabel}</span>
-            <span className={styles.fileName}>{file ? file.name : strings.ChooseFile}</span>
+            <span className={styles.fileNameRow}>
+              <span className={styles.fileName}>{file ? file.name : strings.ChooseFile}</span>
+              {documentKind !== 'unknown' && (
+                <span className={`${styles.kindBadge} ${documentKind === 'incoming' ? styles.kindIncoming : styles.kindOutgoing}`}>
+                  {documentKind === 'incoming'
+                    ? (strings.IncomingLabel || 'Incoming')
+                    : (strings.OutgoingLabel || 'Outgoing')}
+                </span>
+              )}
+            </span>
           </div>
           <div className={styles.toolbarActions}>
             <DefaultButton
@@ -291,28 +335,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             </div>
             <div className={styles.fieldsBody}>
               <p className={styles.hint}>{strings.HighlightHint}</p>
-              {history.records.length > 0 && (
-                <div className={styles.recentBar}>
-                  <span className={styles.recentLabel}>{strings.RecentRecordsLabel}</span>
-                  <div className={styles.recentChips}>
-                    {history.records.map((record) => (
-                      <button
-                        key={record.id}
-                        type="button"
-                        className={styles.recentChip}
-                        title={record.summary}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          this._restoreRecord(record);
-                        }}
-                      >
-                        {record.summary}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
               <div className={styles.fieldGroup}>
                 {fields.map((field) => (
                   <div
@@ -598,35 +620,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this.setState({ historyFieldId: undefined });
   };
 
-  private _restoreRecord = (record: { fields: { label: string; value: string }[] }): void => {
-    const keepName = !!this.state.file;
-    this.setState((prev) => {
-      const byLabel = new Map<string, string>();
-      record.fields.forEach((item) => {
-        byLabel.set(item.label.toLowerCase(), item.value);
-      });
-      const fields = prev.fields.map((field) => {
-        if (keepName && (isNameField(field.label) || isRegistrationNumberField(field.label))) {
-          return field;
-        }
-        const saved = byLabel.get(field.label.toLowerCase());
-        if (saved === undefined) {
-          return field;
-        }
-        return {
-          ...field,
-          value: this._normalizeFieldValue(field.label, saved)
-        };
-      });
-      return {
-        fields: this._syncRegistrationFromName(fields),
-        historyFieldId: undefined,
-        showRequiredErrors: false,
-        error: undefined
-      };
-    });
-  };
-
   private _renderFieldHistory = (field: IFormField): React.ReactNode => {
     if (field.id !== this.state.historyFieldId || !isHistoryTextField(field.label)) {
       return undefined;
@@ -888,9 +881,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _onFieldValueChange = (fieldId: string, value: string): void => {
+    const target = this.state.fields.filter((field) => field.id === fieldId)[0];
     this.setState((prev) => {
-      const target = prev.fields.filter((field) => field.id === fieldId)[0];
-      if (target && isRegistrationNumberField(target.label)) {
+      const current = prev.fields.filter((field) => field.id === fieldId)[0];
+      if (current && isRegistrationNumberField(current.label)) {
         return {
           fields: prev.fields,
           activeFieldId: fieldId,
@@ -914,6 +908,54 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         error: undefined
       };
     });
+    if (target && isProjectNumberField(target.label)) {
+      this._refreshLeadingBlFromNotificationSetup(this._normalizeFieldValue(target.label, value));
+    }
+  };
+
+  private _refreshLeadingBlFromNotificationSetup = (projectNumber: string): void => {
+    const file = this.state.file;
+    if (!file || correspondenceKindFromFileName(file.name) === 'incoming') {
+      return;
+    }
+    const projectNo = sanitizeProjectNumber(projectNumber);
+    if (!isValidProjectNumber(projectNo)) {
+      return;
+    }
+    if (this._leadingBlLookupTimer) {
+      window.clearTimeout(this._leadingBlLookupTimer);
+    }
+    this._leadingBlLookupSeq = this._leadingBlLookupSeq + 1;
+    const seq = this._leadingBlLookupSeq;
+    this._leadingBlLookupTimer = window.setTimeout(() => {
+      this._leadingBlLookupTimer = undefined;
+      lookupLeadingBlFromNotificationSetup(this.props.spHttpClient, this.props.currentWebUrl, projectNo)
+        .then((result) => {
+          if (seq !== this._leadingBlLookupSeq) {
+            return;
+          }
+          const warning = result.thresholdExceeded
+            ? (strings.NotificationSetupThresholdHint ||
+              'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).')
+            : undefined;
+          if (!result.leadingBl && !warning) {
+            return;
+          }
+          this.setState((prev) => ({
+            fields: result.leadingBl
+              ? prev.fields.map((field) => (
+                isLeadingBlField(field.label)
+                  ? { ...field, value: canonicalLeadingBl(result.leadingBl) }
+                  : field
+              ))
+              : prev.fields,
+            warning: warning || prev.warning
+          }));
+        })
+        .catch(() => {
+          return;
+        });
+    }, 400);
   };
 
   private _applyPdfFileName = (fields: IFormField[], fileName?: string): IFormField[] => {
@@ -922,6 +964,18 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isNameField(field.label) && pdfName ? { ...field, value: pdfName } : field
     ));
     return this._syncRegistrationFromName(withName);
+  };
+
+  private _fieldsForSelectedFile = (fields: IFormField[], fileName: string): IFormField[] => {
+    const kind = correspondenceKindFromFileName(fileName);
+    const next = kind === 'incoming'
+      ? fields.map((field) => (
+        isNameField(field.label) || isRegistrationNumberField(field.label)
+          ? field
+          : { ...field, value: this._defaultFieldValue(field.label) }
+      ))
+      : fields;
+    return this._applyPdfFileName(next, fileName);
   };
 
   private _syncRegistrationFromName = (fields: IFormField[]): IFormField[] => {
@@ -1079,11 +1133,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       info: undefined,
       success: undefined,
       successUrl: undefined,
+      successFolderUrl: undefined,
       warning: undefined,
       pages: [],
       currentPage: 1,
       selectedWordIndexes: [],
-      fields: this._applyPdfFileName(this.state.fields, selected.name),
+      fields: this._fieldsForSelectedFile(this.state.fields, selected.name),
       showRequiredErrors: false
     });
   };
@@ -1161,6 +1216,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       error: undefined,
       success: undefined,
       successUrl: undefined,
+      successFolderUrl: undefined,
       warning: undefined,
       showRequiredErrors: false,
       uploadStatus: strings.UploadStarting
@@ -1184,8 +1240,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         uploadStatus: undefined,
         success: locFormat(strings.UploadSucceeded, 'Uploaded {0}.', result.fileName),
         successUrl: result.fileUrl,
+        successFolderUrl: result.folderUrl,
         warning: result.metadataError || undefined,
-        history: this._persistHistory(rememberRecord(this.state.history, fields))
+        history: this._persistHistory(rememberFieldValues(this.state.history, fields))
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : strings.UploadFailed;
@@ -1210,6 +1267,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       info: undefined,
       success: undefined,
       successUrl: undefined,
+      successFolderUrl: undefined,
       warning: undefined,
       showRequiredErrors: false,
       pages: [],
@@ -1243,20 +1301,27 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         }
       );
 
-      this.setState({
-        progress: {
-          page: result.pages.length,
-          totalPages: result.pages.length,
-          percent: 100,
-          status: strings.ExtractingFields
+      let filled: { fields: IFormField[]; info: string | undefined; warning?: string };
+      const documentKind = correspondenceKindFromFileName(file.name);
+      if (documentKind === 'incoming') {
+        filled = {
+          fields: this._applyPdfFileName(this.state.fields, file.name),
+          info: strings.IncomingNoAutoFillHint || 'Incoming files are not auto-filled. Enter fields manually or highlight the PDF.'
+        };
+      } else {
+        this.setState({
+          progress: {
+            page: result.pages.length,
+            totalPages: result.pages.length,
+            percent: 100,
+            status: strings.ExtractingFields
+          }
+        });
+        try {
+          filled = await this._fillFields(result.pages);
+        } catch {
+          filled = { fields: this.state.fields, info: undefined };
         }
-      });
-
-      let filled: { fields: IFormField[]; info: string | undefined };
-      try {
-        filled = await this._fillFields(result.pages);
-      } catch {
-        filled = { fields: this.state.fields, info: undefined };
       }
       this.setState({
         pages: result.pages,
@@ -1265,7 +1330,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         progress: undefined,
         fields: filled.fields,
         error: undefined,
-        info: filled.info
+        info: filled.info,
+        warning: filled.warning
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
@@ -1281,6 +1347,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     fields: IFormField[];
     error: string | undefined;
     info: string | undefined;
+    warning?: string;
   }> => {
     const labels = this.state.fields.map((field) => field.label);
     const firstPage = pages && pages.length > 0 ? pages[0] : undefined;
@@ -1328,7 +1395,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       refNo = '';
     }
     try {
-      projectNumber = projectNumberFromYourRef(extractYourRefNo(pages || []));
+      projectNumber = projectNumberFromRef(extractOurRefOnly(pages || []));
     } catch {
       projectNumber = '';
     }
@@ -1391,9 +1458,37 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     } catch {
       fields = this.state.fields;
     }
+
+    let warning: string | undefined;
+    const projectField = fields.filter((field) => isProjectNumberField(field.label))[0];
+    const resolvedProjectNumber = projectField ? sanitizeProjectNumber(projectField.value) : '';
+    if (resolvedProjectNumber) {
+      try {
+        const setup = await lookupLeadingBlFromNotificationSetup(
+          this.props.spHttpClient,
+          this.props.currentWebUrl,
+          resolvedProjectNumber
+        );
+        if (setup.leadingBl) {
+          fields = fields.map((field) => (
+            isLeadingBlField(field.label)
+              ? { ...field, value: this._normalizeFieldValue(field.label, setup.leadingBl) }
+              : field
+          ));
+        }
+        if (setup.thresholdExceeded) {
+          warning = strings.NotificationSetupThresholdHint ||
+            'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).';
+        }
+      } catch {
+        warning = undefined;
+      }
+    }
+
     return {
       error: undefined,
       info,
+      warning,
       fields
     };
   };
@@ -1455,6 +1550,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       info: undefined,
       success: undefined,
       successUrl: undefined,
+      successFolderUrl: undefined,
       warning: undefined,
       isUploading: false,
       uploadStatus: undefined,
@@ -1481,7 +1577,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _clearSuccess = (): void => {
-    this.setState({ success: undefined, successUrl: undefined });
+    this.setState({ success: undefined, successUrl: undefined, successFolderUrl: undefined });
   };
 
   private _clearWarning = (): void => {
