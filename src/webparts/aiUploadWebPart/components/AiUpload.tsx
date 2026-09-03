@@ -1,22 +1,16 @@
 import * as React from 'react';
 import {
-  ChoiceGroup,
   DatePicker,
   DayOfWeek,
   DefaultButton,
   defaultDatePickerStrings,
   Dropdown,
   IconButton,
-  IChoiceGroupOption,
   IDropdownOption,
   Label,
   Link,
-  MessageBar,
-  MessageBarType,
   PrimaryButton,
   ProgressIndicator,
-  Stack,
-  Text,
   TextField
 } from '@fluentui/react';
 import styles from './AiUpload.module.scss';
@@ -194,44 +188,21 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
     return (
       <section className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''}`}>
-        <Stack tokens={{ childrenGap: 16 }}>
-          <Stack tokens={{ childrenGap: 4 }}>
-            <Text variant="xLarge" className={styles.title}>{strings.WebPartTitle}</Text>
-            <Text variant="medium" className={styles.subtitle}>{strings.WebPartSubtitle}</Text>
-          </Stack>
+        <div className={styles.header}>
+          <h1 className={styles.title}>{strings.WebPartTitle}</h1>
+          <p className={styles.subtitle}>{strings.WebPartSubtitle}</p>
+        </div>
 
-          {error && (
-            <MessageBar
-              messageBarType={MessageBarType.error}
-              onDismiss={this._clearError}
-              dismissButtonAriaLabel={strings.Dismiss}
-            >
-              {error}
-            </MessageBar>
-          )}
-
-          {!error && markRequired && requiredMissing.length > 0 && (
-            <MessageBar messageBarType={MessageBarType.error}>
-              {locFormat(strings.RequiredFieldsPrompt, 'Please fill the required fields: {0}', requiredMissing.join(', '))}
-            </MessageBar>
-          )}
-
-          {info && (
-            <MessageBar
-              messageBarType={MessageBarType.info}
-              onDismiss={this._clearInfo}
-              dismissButtonAriaLabel={strings.Dismiss}
-            >
-              {info}
-            </MessageBar>
-          )}
-
-          {success && (
-            <MessageBar
-              messageBarType={MessageBarType.success}
-              onDismiss={this._clearSuccess}
-              dismissButtonAriaLabel={strings.Dismiss}
-            >
+        {error && this._renderBanner('error', error, this._clearError)}
+        {!error && markRequired && requiredMissing.length > 0 && this._renderBanner(
+          'error',
+          locFormat(strings.RequiredFieldsPrompt, 'Please fill the required fields: {0}', requiredMissing.join(', '))
+        )}
+        {info && this._renderBanner('info', info, this._clearInfo)}
+        {success && this._renderBanner(
+          'success',
+          (
+            <span>
               {success}
               {successUrl && (
                 <span>
@@ -239,47 +210,43 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                   <Link href={successUrl} target="_blank">{strings.OpenUploadedFile}</Link>
                 </span>
               )}
-            </MessageBar>
-          )}
+            </span>
+          ),
+          this._clearSuccess
+        )}
+        {warning && this._renderBanner('warning', warning, this._clearWarning)}
 
-          {warning && (
-            <MessageBar
-              messageBarType={MessageBarType.warning}
-              onDismiss={this._clearWarning}
-              dismissButtonAriaLabel={strings.Dismiss}
-            >
-              {warning}
-            </MessageBar>
-          )}
-
-          <Stack horizontal wrap tokens={{ childrenGap: 12 }} verticalAlign="end">
-            <Stack tokens={{ childrenGap: 6 }}>
-              <Label>{strings.SelectPdfLabel}</Label>
-              <input
-                ref={this._fileInput}
-                type="file"
-                accept="application/pdf,.pdf"
-                className={styles.hiddenFileInput}
-                onChange={this._onFileChange}
-                disabled={busy}
-              />
-              <DefaultButton
-                iconProps={{ iconName: 'PDF' }}
-                text={file ? file.name : strings.ChooseFile}
-                onClick={this._openFilePicker}
-                disabled={busy}
-              />
-            </Stack>
-
+        <div className={styles.toolbar}>
+          <input
+            ref={this._fileInput}
+            type="file"
+            accept="application/pdf,.pdf"
+            className={styles.hiddenFileInput}
+            onChange={this._onFileChange}
+            disabled={busy}
+          />
+          <div className={styles.fileMeta}>
+            <span className={styles.fileLabel}>{strings.SelectPdfLabel}</span>
+            <span className={styles.fileName}>{file ? file.name : strings.ChooseFile}</span>
+          </div>
+          <div className={styles.toolbarActions}>
+            <DefaultButton
+              className={styles.secondaryBtn}
+              text={strings.ChooseFile}
+              onClick={this._openFilePicker}
+              disabled={busy}
+            />
             <PrimaryButton
-              iconProps={{ iconName: 'TextDocument' }}
+              className={styles.primaryBtn}
               text={strings.ConvertButton}
               onClick={this._onConvert}
               disabled={!file || busy}
             />
-          </Stack>
+          </div>
+        </div>
 
-          {isProcessing && progress && (
+        {isProcessing && progress && (
+          <div className={styles.progressWrap}>
             <ProgressIndicator
               label={progress.status}
               description={
@@ -294,22 +261,27 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
               }
               percentComplete={percent}
             />
-          )}
+          </div>
+        )}
 
           <div className={styles.results}>
-            <div className={styles.pane}>
-              <div className={styles.paneHeader}>
-                <Text className={styles.paneTitle}>{strings.FormFieldsLabel}</Text>
-              </div>
-              <div className={styles.fieldsBody}>
-                <Text variant="small" className={styles.hint}>{strings.HighlightHint}</Text>
+          <div className={styles.pane}>
+            <div className={styles.paneHeader}>
+              <span className={styles.paneTitle}>{strings.FormFieldsLabel}</span>
+            </div>
+            <div className={styles.fieldsBody}>
+              <p className={styles.hint}>{strings.HighlightHint}</p>
+              <div className={styles.fieldGroup}>
                 {fields.map((field) => (
                   <div
                     key={field.id}
                     className={`${styles.fieldCard} ${field.id === activeFieldId ? styles.fieldCardActive : ''} ${this._isMissingRequired(field, markRequired) ? styles.fieldCardMissing : ''}`}
                     onClick={() => this._setActiveField(field.id)}
                   >
-                    <Stack horizontal verticalAlign="end" tokens={{ childrenGap: 8 }}>
+                    {isYesNoChoiceField(field.label) ? (
+                      this._renderYesNo(field)
+                    ) : (
+                    <div className={styles.fieldRow}>
                       {isLeadingBlField(field.label) ? (
                         <Dropdown
                           label={field.label}
@@ -333,25 +305,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
                         />
-                      ) : isYesNoChoiceField(field.label) ? (
-                        <ChoiceGroup
-                          label={field.label}
-                          selectedKey={canonicalYesNo(field.value) || YES_VALUE}
-                          options={this._yesNoOptions()}
-                          onChange={(_event, option) => this._onFieldValueChange(field.id, option ? String(option.key) : YES_VALUE)}
-                          onFocus={() => this._setActiveField(field.id)}
-                          required={isRequiredField(field.label)}
-                          className={styles.yesNoGroup}
-                          styles={{
-                            flexContainer: {
-                              display: 'flex',
-                              flexDirection: 'row',
-                              columnGap: '16px'
-                            }
-                          }}
-                        />
                       ) : isIssueDateField(field.label) ? (
-                        <Stack className={styles.fieldInput}>
+                        <div className={styles.fieldInput}>
                           <Label>{ISSUE_DATE_DISPLAY_LABEL}</Label>
                           <DatePicker
                             value={parseIssueDate(field.value)}
@@ -380,6 +335,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                               }
                             }}
                             textField={{
+                              borderless: true,
                               description: strings.IssueDateDescription || 'Date format: dd/MM/yyyy',
                               errorMessage: this._requiredError(field, markRequired),
                               onFocus: () => this._setActiveField(field.id),
@@ -390,7 +346,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                               }
                             }}
                           />
-                        </Stack>
+                        </div>
                       ) : (
                         <TextField
                           label={field.label}
@@ -420,11 +376,13 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           required={isRequiredField(field.label)}
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
+                          borderless={true}
                         />
                       )}
-                      {!isRegistrationNumberField(field.label) && !isYesNoChoiceField(field.label) && (
+                      {!isRegistrationNumberField(field.label) && (
                       <IconButton
-                        iconProps={{ iconName: 'Clear' }}
+                        className={styles.clearFieldBtn}
+                        iconProps={{ iconName: 'Cancel' }}
                         title={strings.ClearField}
                         ariaLabel={strings.ClearField}
                         onClick={(event) => {
@@ -433,39 +391,43 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                         }}
                       />
                       )}
-                    </Stack>
+                    </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
+          </div>
 
             <div className={styles.pane}>
               <div className={styles.paneHeader}>
-                <Text className={styles.paneTitle}>{strings.PdfPreviewLabel}</Text>
-                <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 4 }}>
+                <span className={styles.paneTitle}>{strings.PdfPreviewLabel}</span>
+                <div className={styles.pageNav}>
                   <IconButton
+                    className={styles.pageBtn}
                     iconProps={{ iconName: 'ChevronLeft' }}
                     title={strings.PreviousPage}
                     ariaLabel={strings.PreviousPage}
                     disabled={pages.length === 0 || currentPage <= 1}
                     onClick={this._onPreviousPage}
                   />
-                  <Text>
+                  <span className={styles.pageLabel}>
                     {locFormat(
                       strings.PageProgress,
                       'Page {0} of {1}',
                       String(pages.length > 0 ? currentPage : 0),
                       String(pages.length)
                     )}
-                  </Text>
+                  </span>
                   <IconButton
+                    className={styles.pageBtn}
                     iconProps={{ iconName: 'ChevronRight' }}
                     title={strings.NextPage}
                     ariaLabel={strings.NextPage}
                     disabled={pages.length === 0 || currentPage >= pages.length}
                     onClick={this._onNextPage}
                   />
-                </Stack>
+                </div>
               </div>
               {currentPreview ? (
                 <PdfHighlightViewer
@@ -475,45 +437,107 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                 />
               ) : (
                 <div className={styles.placeholder}>
-                  <Text>{strings.PdfPreviewPlaceholder}</Text>
+                  {strings.PdfPreviewPlaceholder}
                 </div>
               )}
             </div>
           </div>
 
-          <DefaultButton
-            iconProps={{ iconName: 'Clear' }}
-            text={strings.ClearButton}
-            onClick={this._onClear}
-            disabled={busy || (!file && pages.length === 0 && !hasFieldValues)}
-          />
-
-          <div className={styles.uploadBar}>
-            <Text variant="small" className={styles.hint}>{strings.UploadHint}</Text>
-            <Text variant="small" className={styles.destination}>
-              {strings.UploadDestinationLabel}:{' '}
-              {destinationUrl && destination.siteUrl ? (
-                <Link href={destinationUrl} target="_blank">{destinationUrl}</Link>
-              ) : (
-                destinationLabel
+          <div className={styles.footer}>
+            <div className={styles.uploadBar}>
+              <p className={styles.hint}>{strings.UploadHint}</p>
+              <div className={styles.destination}>
+                {strings.UploadDestinationLabel}:{' '}
+                {destinationUrl && destination.siteUrl ? (
+                  <Link href={destinationUrl} target="_blank">{destinationUrl}</Link>
+                ) : (
+                  destinationLabel
+                )}
+              </div>
+              {isUploading && uploadStatus && (
+                <ProgressIndicator label={uploadStatus} />
               )}
-            </Text>
-            {isUploading && uploadStatus && (
-              <ProgressIndicator label={uploadStatus} />
-            )}
-            {file && (
-            <PrimaryButton
-              iconProps={{ iconName: 'Upload' }}
-              text={strings.UploadButton}
-              onClick={this._onUpload}
-              disabled={busy}
-            />
-            )}
+            </div>
+            <div className={styles.footerActions}>
+              <DefaultButton
+                className={styles.ghostBtn}
+                text={strings.ClearButton}
+                onClick={this._onClear}
+                disabled={busy || (!file && pages.length === 0 && !hasFieldValues)}
+              />
+              {file && (
+                <PrimaryButton
+                  className={styles.primaryBtn}
+                  text={strings.UploadButton}
+                  onClick={this._onUpload}
+                  disabled={busy}
+                />
+              )}
+            </div>
           </div>
-        </Stack>
       </section>
     );
   }
+
+  private _renderBanner = (
+    kind: 'error' | 'info' | 'success' | 'warning',
+    message: React.ReactNode,
+    onDismiss?: () => void
+  ): React.ReactNode => {
+    const kindClass = kind === 'error'
+      ? styles.bannerError
+      : kind === 'info'
+        ? styles.bannerInfo
+        : kind === 'success'
+          ? styles.bannerSuccess
+          : styles.bannerWarning;
+    return (
+      <div className={`${styles.banner} ${kindClass}`} role="status">
+        <div className={styles.bannerText}>{message}</div>
+        {onDismiss && (
+          <button
+            type="button"
+            className={styles.bannerDismiss}
+            onClick={onDismiss}
+            aria-label={strings.Dismiss}
+          >
+            ×
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  private _renderYesNo = (field: IFormField): React.ReactNode => {
+    const selected = canonicalYesNo(field.value) || YES_VALUE;
+    return (
+      <div className={styles.yesNoRow}>
+        <span className={styles.yesNoLabel}>
+          {field.label}
+          {isRequiredField(field.label) ? <span className={styles.required}> *</span> : undefined}
+        </span>
+        <div className={styles.segmented} role="radiogroup" aria-label={field.label}>
+          {YES_NO_OPTIONS.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className={`${styles.segment} ${selected === name ? styles.segmentActive : ''}`}
+              aria-checked={selected === name}
+              role="radio"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                this._setActiveField(field.id);
+                this._onFieldValueChange(field.id, name);
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   private _requiredError = (field: IFormField, markRequired: boolean): string | undefined => {
     if (!this._isMissingRequired(field, markRequired)) {
@@ -796,13 +820,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fields: this._syncRegistrationFromName(prev.fields.map((field) => field.id === targetId ? { ...field, value } : field)),
       activeFieldId: targetId,
       error: undefined
-    }));
-  };
-
-  private _yesNoOptions = (): IChoiceGroupOption[] => {
-    return YES_NO_OPTIONS.map((name) => ({
-      key: name,
-      text: name
     }));
   };
 

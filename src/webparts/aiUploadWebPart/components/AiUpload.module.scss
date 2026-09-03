@@ -1,34 +1,343 @@
 @import '~@fluentui/react/dist/sass/References.scss';
 
 .aiUpload {
+  --apple-bg: #f5f5f7;
+  --apple-card: #ffffff;
+  --apple-fill: #f2f2f7;
+  --apple-fill-pressed: #e8e8ed;
+  --apple-text: #1d1d1f;
+  --apple-secondary: #6e6e73;
+  --apple-tertiary: #86868b;
+  --apple-separator: rgba(60, 60, 67, 0.12);
+  --apple-blue: #007aff;
+  --apple-blue-pressed: #0066d6;
+  --apple-green: #34c759;
+  --apple-red: #ff3b30;
+  --apple-orange: #ff9f0a;
+  --apple-radius: 18px;
+  --apple-radius-sm: 12px;
+  --apple-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
   overflow: hidden;
   width: 100%;
-  padding: 1em;
-  color: "[theme:bodyText, default: #323130]";
-  color: var(--bodyText);
+  padding: 28px 24px 32px;
+  border-radius: 24px;
+  background: var(--apple-bg);
+  color: var(--apple-text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
 
   &.teams {
-    font-family: $ms-font-family-fallbacks;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  }
+
+  :global {
+    .ms-Label {
+      font-size: 13px;
+      font-weight: 590;
+      color: var(--apple-secondary);
+      padding-top: 0;
+    }
+
+    .ms-TextField-wrapper .ms-Label::after,
+    .ms-Dropdown-label::after {
+      color: var(--apple-red);
+      padding-left: 3px;
+    }
+
+    .ms-TextField-fieldGroup,
+    .ms-DatePicker .ms-TextField-fieldGroup {
+      border: none !important;
+      border-radius: 10px;
+      background: var(--apple-fill);
+      min-height: 38px;
+      box-shadow: none;
+    }
+
+    .ms-TextField-fieldGroup:hover,
+    .ms-TextField-fieldGroup:focus,
+    .ms-TextField-fieldGroup.is-active,
+    .ms-TextField.is-active .ms-TextField-fieldGroup {
+      border: none !important;
+      background: #ebebf0;
+    }
+
+    .ms-TextField-field {
+      font-size: 15px;
+      font-weight: 400;
+      color: var(--apple-text);
+      padding: 0 12px;
+    }
+
+    .ms-TextField-description {
+      font-size: 12px;
+      color: var(--apple-tertiary);
+      padding-top: 4px;
+    }
+
+    .ms-TextField-errorMessage {
+      font-size: 12px;
+      color: var(--apple-red);
+    }
+
+    .ms-Dropdown-title {
+      border: none !important;
+      border-radius: 10px;
+      background: var(--apple-fill);
+      min-height: 38px;
+      line-height: 38px;
+      font-size: 15px;
+      color: var(--apple-text);
+    }
+
+    .ms-Dropdown-titleIsPlaceHolder {
+      color: var(--apple-tertiary);
+    }
+
+    .ms-Dropdown:hover .ms-Dropdown-title,
+    .ms-Dropdown.is-open .ms-Dropdown-title {
+      border: none !important;
+      background: #ebebf0;
+    }
+
+    .ms-Dropdown-caretDownWrapper {
+      height: 38px;
+      line-height: 38px;
+      color: var(--apple-tertiary);
+    }
+
+    .ms-Link {
+      color: var(--apple-blue);
+    }
+
+    .ms-Link:hover {
+      color: var(--apple-blue-pressed);
+      text-decoration: underline;
+    }
+
+    .ms-ProgressIndicator-itemProgress {
+      padding: 0;
+    }
+
+    .ms-ProgressIndicator-progressTrack {
+      background: var(--apple-fill-pressed);
+      border-radius: 999px;
+      height: 4px;
+    }
+
+    .ms-ProgressIndicator-progressBar {
+      background: var(--apple-blue);
+      border-radius: 999px;
+      height: 4px;
+    }
+
+    .ms-ProgressIndicator-itemName,
+    .ms-ProgressIndicator-itemDescription {
+      font-size: 13px;
+      color: var(--apple-secondary);
+      font-weight: 510;
+    }
   }
 }
 
+.header {
+  margin-bottom: 8px;
+}
+
 .title {
-  font-weight: 600;
-  color: "[theme:bodyText, default: #323130]";
-  color: var(--bodyText);
+  display: block;
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--apple-text);
 }
 
 .subtitle {
-  color: "[theme:bodySubtext, default: #605e5c]";
+  display: block;
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--apple-secondary);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin: 20px 0 16px;
+  background: var(--apple-card);
+  border-radius: var(--apple-radius);
+  box-shadow: var(--apple-shadow);
+}
+
+.fileMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.fileLabel {
+  font-size: 12px;
+  font-weight: 590;
+  color: var(--apple-tertiary);
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.fileName {
+  font-size: 15px;
+  font-weight: 590;
+  color: var(--apple-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hiddenFileInput {
   display: none;
 }
 
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.primaryBtn,
+.secondaryBtn,
+.ghostBtn {
+  &:global(.ms-Button) {
+    height: 40px;
+    padding: 0 18px;
+    border-radius: 980px;
+    border: none;
+    font-size: 15px;
+    font-weight: 590;
+    min-width: auto;
+  }
+
+  &:global(.ms-Button .ms-Button-label) {
+    font-weight: 590;
+  }
+}
+
+.primaryBtn {
+  &:global(.ms-Button) {
+    background: var(--apple-blue);
+    color: #fff;
+  }
+
+  &:global(.ms-Button:hover),
+  &:global(.ms-Button:focus) {
+    background: var(--apple-blue-pressed);
+    color: #fff;
+  }
+
+  &:global(.ms-Button.is-disabled) {
+    background: var(--apple-blue);
+    color: #fff;
+    opacity: 0.38;
+  }
+}
+
+.secondaryBtn {
+  &:global(.ms-Button) {
+    background: var(--apple-fill);
+    color: var(--apple-text);
+  }
+
+  &:global(.ms-Button:hover) {
+    background: var(--apple-fill-pressed);
+    color: var(--apple-text);
+  }
+
+  &:global(.ms-Button.is-disabled) {
+    opacity: 0.45;
+  }
+}
+
+.ghostBtn {
+  &:global(.ms-Button) {
+    background: transparent;
+    color: var(--apple-blue);
+  }
+
+  &:global(.ms-Button:hover) {
+    background: rgba(0, 122, 255, 0.08);
+    color: var(--apple-blue);
+  }
+
+  &:global(.ms-Button.is-disabled) {
+    color: var(--apple-tertiary);
+    background: transparent;
+  }
+}
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--apple-text);
+}
+
+.bannerError {
+  background: rgba(255, 59, 48, 0.12);
+}
+
+.bannerInfo {
+  background: rgba(0, 122, 255, 0.1);
+}
+
+.bannerSuccess {
+  background: rgba(52, 199, 89, 0.14);
+}
+
+.bannerWarning {
+  background: rgba(255, 159, 10, 0.16);
+}
+
+.bannerText {
+  flex: 1;
+  min-width: 0;
+}
+
+.bannerDismiss {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--apple-secondary);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 20px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.bannerDismiss:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.progressWrap {
+  padding: 4px 4px 12px;
+}
+
 .results {
   display: grid;
-  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.18fr);
   gap: 16px;
   align-items: start;
 }
@@ -37,9 +346,9 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid "[theme:neutralLight, default: #edebe9]";
-  border-radius: 4px;
-  background: "[theme:white, default: #ffffff]";
+  background: var(--apple-card);
+  border-radius: var(--apple-radius);
+  box-shadow: var(--apple-shadow);
   overflow: hidden;
 }
 
@@ -48,13 +357,52 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid "[theme:neutralLight, default: #edebe9]";
-  background: "[theme:neutralLighterAlt, default: #faf9f8]";
+  padding: 14px 16px 10px;
+  background: transparent;
+  border-bottom: none;
 }
 
 .paneTitle {
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--apple-text);
+}
+
+.pageNav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  background: var(--apple-fill);
+  border-radius: 980px;
+}
+
+.pageLabel {
+  min-width: 92px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 590;
+  color: var(--apple-secondary);
+}
+
+.pageBtn {
+  &:global(.ms-Button) {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--apple-text);
+  }
+
+  &:global(.ms-Button:hover) {
+    background: #fff;
+  }
+
+  &:global(.ms-Button.is-disabled) {
+    color: #c7c7cc;
+    background: transparent;
+  }
 }
 
 .paneBody {
@@ -65,29 +413,55 @@
 .fieldsBody {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px;
+  gap: 10px;
+  padding: 0 12px 16px;
 }
 
 .hint {
-  color: "[theme:bodySubtext, default: #605e5c]";
+  margin: 0 4px 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--apple-secondary);
+}
+
+.fieldGroup {
+  overflow: hidden;
+  border-radius: var(--apple-radius-sm);
+  background: var(--apple-card);
+  border: 1px solid var(--apple-separator);
 }
 
 .fieldCard {
-  padding: 4px 8px;
-  border: 1px solid "[theme:neutralLight, default: #edebe9]";
-  border-radius: 4px;
+  padding: 10px 12px 12px;
+  border: none;
+  border-bottom: 1px solid var(--apple-separator);
+  border-radius: 0;
+  background: transparent;
   cursor: pointer;
 }
 
+.fieldCard:last-child {
+  border-bottom: none;
+}
+
 .fieldCardActive {
-  border-color: "[theme:themePrimary, default: #03787c]";
-  background: "[theme:themeLighterAlt, default: #f3f9f9]";
+  background: rgba(0, 122, 255, 0.06);
+  box-shadow: inset 3px 0 0 var(--apple-blue);
 }
 
 .fieldCardMissing {
-  border-color: "[theme:errorText, default: #a4262c]";
-  background: "[theme:errorBackground, default: #fde7e9]";
+  background: rgba(255, 59, 48, 0.06);
+  box-shadow: inset 3px 0 0 var(--apple-red);
+}
+
+.fieldCardActive.fieldCardMissing {
+  box-shadow: inset 3px 0 0 var(--apple-red);
+}
+
+.fieldRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 .fieldInput {
@@ -95,9 +469,65 @@
   min-width: 0;
 }
 
-.yesNoGroup {
-  flex: 1;
-  min-width: 0;
+.yesNoRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 36px;
+}
+
+.yesNoLabel {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--apple-text);
+}
+
+.required {
+  color: var(--apple-red);
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--apple-fill);
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+
+.segment {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--apple-text);
+  padding: 6px 14px;
+  min-width: 52px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 590;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.segmentActive {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.clearFieldBtn {
+  &:global(.ms-Button) {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    color: var(--apple-tertiary);
+    background: transparent;
+  }
+
+  &:global(.ms-Button:hover) {
+    background: var(--apple-fill);
+    color: var(--apple-text);
+  }
 }
 
 .textField {
@@ -111,7 +541,7 @@
   overflow: auto;
   min-height: 480px;
   padding: 16px;
-  background: "[theme:neutralSecondary, default: #605e5c]";
+  background: #e8e8ed;
   user-select: none;
 }
 
@@ -127,7 +557,8 @@
   max-width: 100%;
   height: auto;
   background: #fff;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
 
@@ -142,43 +573,88 @@
 }
 
 .wordSelected {
-  fill: rgba(255, 213, 0, 0.42);
-  stroke: rgba(201, 151, 0, 0.9);
+  fill: rgba(0, 122, 255, 0.22);
+  stroke: rgba(0, 122, 255, 0.7);
   stroke-width: 1;
 }
 
 .dragRect {
-  fill: rgba(0, 120, 212, 0.18);
-  stroke: rgba(0, 120, 212, 0.9);
+  fill: rgba(0, 122, 255, 0.16);
+  stroke: rgba(0, 122, 255, 0.85);
   stroke-width: 1;
   stroke-dasharray: 4 3;
 }
 
 .placeholder {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 480px;
-  padding: 24px;
+  padding: 32px 24px;
   text-align: center;
-  color: "[theme:bodySubtext, default: #605e5c]";
+  color: var(--apple-secondary);
+  background: #f2f2f7;
+  font-size: 15px;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--apple-card);
+  border-radius: var(--apple-radius);
+  box-shadow: var(--apple-shadow);
 }
 
 .uploadBar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid "[theme:neutralLight, default: #edebe9]";
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  padding-top: 0;
+  border-top: none;
 }
 
 .destination {
   word-break: break-all;
-  color: "[theme:bodyText, default: #323130]";
+  color: var(--apple-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.footerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 @media (max-width: 900px) {
+  .aiUpload {
+    padding: 20px 16px 24px;
+    border-radius: 0;
+  }
+
+  .title {
+    font-size: 28px;
+  }
+
   .results {
     grid-template-columns: 1fr;
+  }
+
+  .footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .footerActions {
+    justify-content: flex-end;
   }
 }
