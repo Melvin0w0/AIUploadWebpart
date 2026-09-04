@@ -12,6 +12,7 @@ define([], function () {
     ExtractedTextLabel: 'Extracted text',
     ExtractedTextPlaceholder: 'OCR results will appear here after conversion.',
     ExtractedTextDescription: 'OCR text for this page. Underlined words are wrapped in <u>...</u>. Bold words are wrapped in <b>...</b>.',
+    DebugOcrStyles: 'Debug',
     PdfPreviewLabel: 'PDF preview',
     PdfPreviewPlaceholder: 'The OCR PDF preview will appear here after conversion.',
     PreviousPage: 'Previous page',

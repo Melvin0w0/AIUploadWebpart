@@ -98,6 +98,7 @@ interface IAiUploadState {
   isUploading: boolean;
   uploadStatus: string | undefined;
   showRequiredErrors: boolean;
+  showOcrStyles: boolean;
   history: IFieldHistory;
   historyFieldId: string | undefined;
 }
@@ -141,6 +142,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isUploading: false,
       uploadStatus: undefined,
       showRequiredErrors: false,
+      showOcrStyles: false,
       history: loadFieldHistory(),
       historyFieldId: undefined
     };
@@ -198,6 +200,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isUploading,
       uploadStatus,
       showRequiredErrors,
+      showOcrStyles,
       historyFieldId
     } = this.state;
     const busy = isProcessing || isUploading;
@@ -493,6 +496,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             </div>
           </div>
 
+            <div className={styles.previewColumn}>
             <div className={styles.pane}>
               <div className={styles.paneHeader}>
                 <span className={styles.paneTitle}>{strings.PdfPreviewLabel}</span>
@@ -527,6 +531,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                 <PdfHighlightViewer
                   page={currentPreview}
                   selectedIndexes={selectedWordIndexes}
+                  showStyles={showOcrStyles}
                   onSelectText={this._onPdfSelectText}
                 />
               ) : (
@@ -535,24 +540,32 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                 </div>
               )}
             </div>
-          </div>
 
-          <div className={styles.ocrTextPane}>
-            <div className={styles.paneHeader}>
-              <span className={styles.paneTitle}>{strings.ExtractedTextLabel}</span>
+            <div className={styles.ocrTextPane}>
+              <div className={styles.paneHeader}>
+                <span className={styles.paneTitle}>{strings.ExtractedTextLabel}</span>
+                <button
+                  type="button"
+                  className={`${styles.debugBtn} ${showOcrStyles ? styles.debugBtnOn : ''}`}
+                  onClick={this._onToggleOcrStyles}
+                >
+                  Debug
+                </button>
+              </div>
+              <div className={styles.ocrTextBody}>
+                <p className={styles.hint}>{strings.ExtractedTextDescription}</p>
+                <TextField
+                  multiline={true}
+                  readOnly={true}
+                  resizable={true}
+                  rows={8}
+                  value={ocrInspectText}
+                  placeholder={strings.ExtractedTextPlaceholder}
+                  className={styles.ocrTextField}
+                  borderless={true}
+                />
+              </div>
             </div>
-            <div className={styles.ocrTextBody}>
-              <p className={styles.hint}>{strings.ExtractedTextDescription}</p>
-              <TextField
-                multiline={true}
-                readOnly={true}
-                resizable={true}
-                rows={14}
-                value={ocrInspectText}
-                placeholder={strings.ExtractedTextPlaceholder}
-                className={styles.ocrTextField}
-                borderless={true}
-              />
             </div>
           </div>
 
@@ -1164,6 +1177,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fields: this._fieldsForSelectedFile(this.state.fields, selected.name),
       showRequiredErrors: false
     });
+  };
+
+  private _onToggleOcrStyles = (): void => {
+    this.setState((prev) => ({
+      showOcrStyles: !prev.showOcrStyles
+    }));
   };
 
   private _onPreviousPage = (): void => {

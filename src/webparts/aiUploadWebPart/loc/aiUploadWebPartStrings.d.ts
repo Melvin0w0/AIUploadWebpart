@@ -11,6 +11,7 @@ declare interface IAiUploadWebPartStrings {
   ExtractedTextLabel: string;
   ExtractedTextPlaceholder: string;
   ExtractedTextDescription: string;
+  DebugOcrStyles: string;
   PdfPreviewLabel: string;
   PdfPreviewPlaceholder: string;
   PreviousPage: string;

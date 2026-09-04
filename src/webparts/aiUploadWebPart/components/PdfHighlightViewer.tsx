@@ -6,6 +6,7 @@ import styles from './AiUpload.module.scss';
 export interface IPdfHighlightViewerProps {
   page: IOcrPageResult;
   selectedIndexes: number[];
+  showStyles?: boolean;
   onSelectText: (text: string, indexes: number[]) => void;
 }
 
@@ -61,7 +62,7 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
   }
 
   public render(): React.ReactElement<IPdfHighlightViewerProps> {
-    const { page, selectedIndexes } = this.props;
+    const { page, selectedIndexes, showStyles } = this.props;
     const { displayWidth, displayHeight, isDragging, startX, startY, currentX, currentY } = this.state;
     const words = page.words || [];
     const scale = page.width > 0 && displayWidth > 0 ? displayWidth / page.width : 1;
@@ -97,7 +98,7 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                 const height = Math.max(1, (word.y1 - word.y0) * scale);
                 return (
                   <g key={`${word.x0}-${word.y0}-${index}`}>
-                    {word.bold && !isSelected && (
+                    {showStyles && word.bold && !isSelected && (
                       <rect
                         x={x}
                         y={y}
@@ -113,7 +114,7 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                       height={height}
                       className={isSelected ? styles.wordSelected : styles.wordHit}
                     />
-                    {word.underline && (
+                    {showStyles && word.underline && (
                       <line
                         x1={x}
                         x2={x + width}
