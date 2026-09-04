@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import Tesseract from 'tesseract.js';
 import pdfWorkerAsset from '../assets/pdf.worker.min.jpg';
 import { IOcrPageResult, IOcrProgress, IOcrResult } from './IPdfOcr';
+import { annotateOcrWordStyles } from './ocrWordStyles';
 
 const MAX_RENDER_WIDTH = 1600;
 const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm';
@@ -89,23 +90,32 @@ export class PdfOcrService {
 
         const result = await worker.recognize(canvas);
         const pageText = (result.data.text || '').trim();
-        const imageUrl = await PdfOcrService._canvasToObjectUrl(canvas);
         const ocrWords = result.data.words || [];
+        const words = ocrWords
+          .filter((word) => !!word.text && word.text.trim().length > 0)
+          .map((word) => ({
+            text: word.text,
+            x0: word.bbox.x0,
+            y0: word.bbox.y0,
+            x1: word.bbox.x1,
+            y1: word.bbox.y1
+          }));
+        try {
+          const styleContext = canvas.getContext('2d', { willReadFrequently: true });
+          if (styleContext) {
+            annotateOcrWordStyles(words, styleContext.getImageData(0, 0, canvas.width, canvas.height));
+          }
+        } catch {
+          // Keep plain OCR words if the page image cannot be sampled.
+        }
+        const imageUrl = await PdfOcrService._canvasToObjectUrl(canvas);
         const pageResult: IOcrPageResult = {
           pageNumber: pageNum,
           text: pageText,
           imageUrl,
           width: canvas.width,
           height: canvas.height,
-          words: ocrWords
-            .filter((word) => !!word.text && word.text.trim().length > 0)
-            .map((word) => ({
-              text: word.text,
-              x0: word.bbox.x0,
-              y0: word.bbox.y0,
-              x1: word.bbox.x1,
-              y1: word.bbox.y1
-            }))
+          words
         };
         pages.push(pageResult);
         if (onPage) {

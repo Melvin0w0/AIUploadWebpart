@@ -16,13 +16,20 @@ const SUBJECT_PROMPT: string = [
   'Strictly extract content from the letter body ONLY, which is the text that appears AFTER the salutation (Dear Sir / Dear Madam / Dear Sir or Madam / etc.) and BEFORE the closing (Yours faithfully / Yours sincerely / Yours truly).',
   '',
   'Primary instruction (must follow first):',
-  '- Locate and copy the entire underlined passage in that body section as one continuous block.',
-  '- Do not stop at the first line after the salutation. Scan the whole body for any underlined text.',
+  '- After the salutation, find the first line that contains any <u>...</u> underlined text.',
+  '- Copy that entire line, including words on the same line that are not inside <u> tags.',
+  '- If the next lines are also underlined (contain <u>), append those entire lines too, in order.',
+  '- Stop at the first following line that has no <u> tag.',
   '',
-  'Fallback (only if there is absolutely no underline anywhere in the body):',
+  'If there is no underlined line after the salutation:',
+  '- Then copy the bold heading in the same body range. Prefer text wrapped in <b>...</b> tags.',
+  '- Do not copy a random bold word inside a normal sentence.',
+  '',
+  'Fallback (only if there is absolutely no underline or bold heading anywhere in the body):',
   '- Then extract the Re: or Subject: line that appears in the same body range.',
   '',
-  'Do not include the salutation or the closing in the result.'
+  'Do not include the salutation or the closing in the result.',
+  'Do not copy <u>, </u>, <b>, or </b> tags into the field value.'
 ].join('\n');
 
 export async function extractFieldsWithAi(
@@ -136,7 +143,7 @@ function buildRequest(
     messages: [
       {
         role: 'system',
-        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. Organization is the line ending with Department that appears below By Post. Sender is the printed person name immediately below the handwritten signature, not the job title. Receiver is the value after Attn: if present; if there is no Attn, it is the person name below By Hand. Omit Mr., Ms., Mrs., Miss, and any parenthetical text. Subject:\n' + SUBJECT_PROMPT + '\nRef No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref. Do not invent values.'
+        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values. Organization is the line ending with Department that appears below By Post. Sender is the printed person name immediately below the handwritten signature, not the job title. Receiver is the value after Attn: if present; if there is no Attn, it is the person name below By Hand. Omit Mr., Ms., Mrs., Miss, and any parenthetical text. Subject:\n' + SUBJECT_PROMPT + '\nRef No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref. Do not invent values.'
       },
       {
         role: 'user',
@@ -188,11 +195,11 @@ function buildUserPrompt(
     ? [
       'Extract these fields from the first page of a scanned document.',
       'Images: full first page, the addressee area for By Post / By Hand / Attn, the heading after Dear Sir, then the signature block if detected.',
-      'Organization is the Department line below By Post. Receiver is Attn if present, otherwise the person name below By Hand without Mr./Ms. or parenthetical text. Subject: scan the whole letter body after the salutation for the entire underlined block; do not stop at the first line. Sender is the printed name immediately below the signature.'
+      'Organization is the Department line below By Post. Receiver is Attn if present, otherwise the person name below By Hand without Mr./Ms. or parenthetical text. Subject: after Dear Sir/Madam, copy the entire first underlined line and any immediately following underlined lines. Sender is the printed name immediately below the signature.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Organization is the Department line below By Post. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name below By Hand. Subject: scan the whole letter body after the salutation for the entire underlined block; do not stop at the first line.'
+      'Organization is the Department line below By Post. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name below By Hand. Subject: after Dear Sir/Madam, copy the entire first underlined line and any immediately following underlined lines.'
     ];
 
   const parts = [
@@ -203,7 +210,7 @@ function buildUserPrompt(
     'Field meanings:',
     fieldHelp,
     '',
-    'OCR text:',
+    'OCR text (plain words plus <u>underline</u> and <b>bold</b> tags when detected):',
     ocrText || '(none)'
   ];
   if (signature && signature.senderName) {
@@ -225,7 +232,7 @@ function buildUserPrompt(
   }
   parts.push('', SUBJECT_PROMPT);
   if (subjectText && subjectText.trim()) {
-    parts.push('', 'OCR underlined candidate only. Follow the Subject rules above; scan the whole body and do not stop at the first line after the salutation:', subjectText.trim());
+    parts.push('', 'Detected Subject from the first underlined line after Dear, plus any following consecutive underlined lines. Use this whole block:', subjectText.trim());
   }
   if (refNo && refNo.trim()) {
     parts.push('', 'Detected Ref No from Our Ref: or standalone Ref:', refNo.trim());
@@ -281,7 +288,7 @@ async function buildPageImages(
         images.push({
           url: crop,
           detail: 'high',
-          label: 'Letter body AFTER the salutation and BEFORE the closing. Subject: scan this whole body for the entire underlined block; do not stop at the first line. Fallback only if there is no underline: Re: or Subject: line:'
+          label: 'Letter body AFTER the salutation and BEFORE the closing. Subject: copy the entire first underlined / <u> line and any immediately following underlined lines. If none, the bold heading. Fallback only if there is no underline or bold heading: Re: or Subject: line:'
         });
       }
     }
@@ -370,17 +377,21 @@ function parseFieldJson(content: string, fieldLabels: string[]): { [label: strin
   fieldLabels.forEach((label) => {
     const direct = parsed[label];
     if (typeof direct === 'string' && direct.trim()) {
-      values[label] = direct.trim();
+      values[label] = stripStyleTags(direct.trim());
       return;
     }
     const matchedKey = Object.keys(parsed).filter((key) => key.toLowerCase() === label.toLowerCase())[0];
     const matched = matchedKey ? parsed[matchedKey] : undefined;
     if (typeof matched === 'string' && matched.trim()) {
-      values[label] = matched.trim();
+      values[label] = stripStyleTags(matched.trim());
     }
   });
 
   return values;
+}
+
+function stripStyleTags(value: string): string {
+  return (value || '').replace(/<\/?(?:u|b)>/gi, '').replace(/\s+/g, ' ').trim();
 }
 
 function stripFence(content: string): string {

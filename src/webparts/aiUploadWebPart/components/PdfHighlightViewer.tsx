@@ -91,15 +91,38 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
             >
               {words.map((word, index) => {
                 const isSelected = highlightIndexes.indexOf(index) >= 0;
+                const x = word.x0 * scale;
+                const y = word.y0 * scale;
+                const width = Math.max(1, (word.x1 - word.x0) * scale);
+                const height = Math.max(1, (word.y1 - word.y0) * scale);
                 return (
-                  <rect
-                    key={`${word.x0}-${word.y0}-${index}`}
-                    x={word.x0 * scale}
-                    y={word.y0 * scale}
-                    width={Math.max(1, (word.x1 - word.x0) * scale)}
-                    height={Math.max(1, (word.y1 - word.y0) * scale)}
-                    className={isSelected ? styles.wordSelected : styles.wordHit}
-                  />
+                  <g key={`${word.x0}-${word.y0}-${index}`}>
+                    {word.bold && !isSelected && (
+                      <rect
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={height}
+                        className={styles.wordBold}
+                      />
+                    )}
+                    <rect
+                      x={x}
+                      y={y}
+                      width={width}
+                      height={height}
+                      className={isSelected ? styles.wordSelected : styles.wordHit}
+                    />
+                    {word.underline && (
+                      <line
+                        x1={x}
+                        x2={x + width}
+                        y1={y + height}
+                        y2={y + height}
+                        className={styles.wordUnderline}
+                      />
+                    )}
+                  </g>
                 );
               })}
             </svg>

@@ -785,6 +785,34 @@
   height: 100%;
 }
 
+.ocrTextPane {
+  margin-top: 16px;
+  background: var(--apple-card);
+  border-radius: var(--apple-radius);
+  box-shadow: var(--apple-shadow);
+  overflow: hidden;
+}
+
+.ocrTextBody {
+  padding: 0 16px 16px;
+}
+
+.ocrTextField {
+  :global(.ms-TextField-fieldGroup) {
+    min-height: 240px !important;
+    align-items: stretch;
+    background: var(--apple-fill);
+  }
+
+  :global(.ms-TextField-field) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    padding: 12px !important;
+    white-space: pre-wrap;
+  }
+}
+
 .pdfViewer {
   display: flex;
   justify-content: center;
@@ -822,6 +850,16 @@
 
 .wordHit {
   fill: transparent;
+}
+
+.wordBold {
+  fill: rgba(255, 159, 10, 0.16);
+}
+
+.wordUnderline {
+  stroke: #007aff;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 
 .wordSelected {

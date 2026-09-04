@@ -8,28 +8,107 @@ export interface ISelectionRect {
 }
 
 export function joinOcrWords(words: IOcrWord[]): string {
-  if (!words || words.length === 0) {
+  return joinSortedOcrWords(sortOcrWords(words), false);
+}
+
+export function formatOcrTextWithStyles(words: IOcrWord[]): string {
+  const sorted = sortOcrWords(words);
+  if (sorted.length === 0) {
     return '';
   }
+  let hasStyle = false;
+  for (let index = 0; index < sorted.length; index++) {
+    if (sorted[index].bold || sorted[index].underline) {
+      hasStyle = true;
+      break;
+    }
+  }
+  return joinSortedOcrWords(sorted, hasStyle);
+}
 
-  const sorted = words.slice().sort((left, right) => {
+function sortOcrWords(words: IOcrWord[]): IOcrWord[] {
+  if (!words || words.length === 0) {
+    return [];
+  }
+  return words.slice().sort((left, right) => {
     const lineHeight = Math.max(left.y1 - left.y0, right.y1 - right.y0, 1);
     if (Math.abs(left.y0 - right.y0) > lineHeight * 0.5) {
       return left.y0 - right.y0;
     }
     return left.x0 - right.x0;
   });
+}
 
-  let text = wordText(sorted[0]);
+function joinSortedOcrWords(sorted: IOcrWord[], withStyles: boolean): string {
+  if (sorted.length === 0) {
+    return '';
+  }
+
+  let text = '';
+  let openBold = false;
+  let openUnderline = false;
+  const flushClose = (): void => {
+    if (openBold) {
+      text += '</b>';
+      openBold = false;
+    }
+    if (openUnderline) {
+      text += '</u>';
+      openUnderline = false;
+    }
+  };
+  const syncTags = (word: IOcrWord): void => {
+    const wantU = withStyles && !!word.underline;
+    const wantB = withStyles && !!word.bold;
+    if (wantU && !openUnderline) {
+      text += '<u>';
+      openUnderline = true;
+    }
+    if (wantB && !openBold) {
+      text += '<b>';
+      openBold = true;
+    }
+  };
+
+  syncTags(sorted[0]);
+  text += wordText(sorted[0]);
   for (let index = 1; index < sorted.length; index++) {
     const previous = sorted[index - 1];
     const current = sorted[index];
     const lineHeight = Math.max(previous.y1 - previous.y0, 1);
     const isNewLine = current.y0 - previous.y0 > lineHeight * 0.6;
-    text += isNewLine ? '\n' : joinGap(wordText(previous), wordText(current));
+    const styleChanged = withStyles &&
+      (!!previous.bold !== !!current.bold || !!previous.underline !== !!current.underline);
+    if (isNewLine) {
+      flushClose();
+      text += '\n';
+      syncTags(current);
+    } else if (styleChanged) {
+      const wantU = !!current.underline;
+      const wantB = !!current.bold;
+      if (openBold && (!wantB || (openUnderline && !wantU))) {
+        text += '</b>';
+        openBold = false;
+      }
+      if (openUnderline && !wantU) {
+        text += '</u>';
+        openUnderline = false;
+      }
+      text += joinGap(wordText(previous), wordText(current));
+      if (wantU && !openUnderline) {
+        text += '<u>';
+        openUnderline = true;
+      }
+      if (wantB && !openBold) {
+        text += '<b>';
+        openBold = true;
+      }
+    } else {
+      text += joinGap(wordText(previous), wordText(current));
+    }
     text += wordText(current);
   }
-
+  flushClose();
   return text.trim();
 }
 

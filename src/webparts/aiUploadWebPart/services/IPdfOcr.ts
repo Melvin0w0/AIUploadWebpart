@@ -11,6 +11,8 @@ export interface IOcrWord {
   y0: number;
   x1: number;
   y1: number;
+  bold?: boolean;
+  underline?: boolean;
 }
 
 export interface IOcrPageResult {

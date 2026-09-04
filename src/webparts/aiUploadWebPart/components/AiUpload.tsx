@@ -19,6 +19,7 @@ import * as strings from 'AiUploadWebPartStrings';
 import { locFormat } from '../loc/locFormat';
 import { PdfOcrService } from '../services/PdfOcrService';
 import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
+import { formatOcrTextWithStyles } from '../services/ocrSelection';
 import PdfHighlightViewer from './PdfHighlightViewer';
 import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
 import { correspondenceKindFromFileName, nameFromPdfFile } from '../constants/incomingName';
@@ -205,6 +206,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const markRequired = converted || showRequiredErrors;
     const percent = progress ? Math.max(0, Math.min(100, progress.percent)) / 100 : 0;
     const currentPreview = pages.filter((page) => page.pageNumber === currentPage)[0];
+    const ocrInspectText = currentPreview
+      ? (formatOcrTextWithStyles(currentPreview.words || []) || currentPreview.text || '')
+      : '';
     const hasFieldValues = fields.some((field) => field.value.length > 0);
     const destination = resolveUploadDestination(fields, {
       tenantUrl: this.props.tenantUrl,
@@ -530,6 +534,25 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                   {strings.PdfPreviewPlaceholder}
                 </div>
               )}
+            </div>
+          </div>
+
+          <div className={styles.ocrTextPane}>
+            <div className={styles.paneHeader}>
+              <span className={styles.paneTitle}>{strings.ExtractedTextLabel}</span>
+            </div>
+            <div className={styles.ocrTextBody}>
+              <p className={styles.hint}>{strings.ExtractedTextDescription}</p>
+              <TextField
+                multiline={true}
+                readOnly={true}
+                resizable={true}
+                rows={14}
+                value={ocrInspectText}
+                placeholder={strings.ExtractedTextPlaceholder}
+                className={styles.ocrTextField}
+                borderless={true}
+              />
             </div>
           </div>
 
@@ -1410,7 +1433,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
     if (isAiExtractionConfigured(aiConfig)) {
       try {
-        const ocrText = (pages || []).map((page) => page.text || '').join('\n');
+        const ocrText = (pages || []).map((page) => formatOcrTextWithStyles(page.words || []) || page.text || '').join('\n');
         aiValues = await extractFieldsWithAi(ocrText, labels, aiConfig, firstPage, signature, receiverName, subjectText, refNo, organization);
       } catch {
         aiValues = {};

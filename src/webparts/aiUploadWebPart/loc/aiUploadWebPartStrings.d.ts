@@ -10,6 +10,7 @@ declare interface IAiUploadWebPartStrings {
   ConvertButton: string;
   ExtractedTextLabel: string;
   ExtractedTextPlaceholder: string;
+  ExtractedTextDescription: string;
   PdfPreviewLabel: string;
   PdfPreviewPlaceholder: string;
   PreviousPage: string;
