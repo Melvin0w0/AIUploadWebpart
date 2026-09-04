@@ -143,7 +143,7 @@ function buildRequest(
     messages: [
       {
         role: 'system',
-        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values. Organization is the line ending with Department that appears below By Post. Sender is the printed person name immediately below the handwritten signature, not the job title. Receiver is the value after Attn: if present; if there is no Attn, it is the person name below By Hand. Omit Mr., Ms., Mrs., Miss, and any parenthetical text. Subject:\n' + SUBJECT_PROMPT + '\nRef No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref. Do not invent values.'
+        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values. Organization is every full line containing Department that appears below Our Ref and above Dear. Sender is the printed person name immediately below the handwritten signature, not the job title. Receiver is the value after Attn: if present; if there is no Attn, it is the person name below By Hand. Omit Mr., Ms., Mrs., Miss, and any parenthetical text. Subject:\n' + SUBJECT_PROMPT + '\nRef No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref. Do not invent values.'
       },
       {
         role: 'user',
@@ -177,7 +177,7 @@ function buildUserPrompt(
     'Leading BL: leading business line. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water. Abbreviations such as ARC, BEG, ENV, GEO, ISD, LSM, MEP, PCM, PCC, TRA, UNC, UAP, WAT are also accepted. If an AECOM business-line logo or name is visible, select that listed value.',
     'Project Number: the 8 digits immediately before the slash in Our Ref: / Our Ref :. For example Our Ref: 12345678/ABC -> 12345678. Digits only. Do not use Your Ref.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
-    'Organization: copy the XXX Department line below By Post / By Post:. For example Highways Department. Do not copy Director of ... unless that line itself is the Department name. Do not use the letterhead.',
+    'Organization: ABOVE the Dear line and BELOW Our Ref:, copy every full line that contains the word Department. If there are several such lines, join them with a space. Do not use letterhead above Our Ref. Do not use lines after Dear.',
     'Sender: copy the printed person name immediately below the handwritten signature. If two names appear under Yours faithfully, use the lower name that sits just above the job title. Do not copy Chief Engineer, Director, Manager, or similar titles. Skip (signed).',
     'Receiver: if Attn: / Attn : / Attention: is present, copy only the value after that label. If there is no Attn, copy the person name below By Hand. Do not include Mr., Ms., Mrs., Miss, Dr., or Ir. Delete any parentheses and the text inside them. Do not copy Department lines.',
     'Subject:\n' + SUBJECT_PROMPT,
@@ -195,11 +195,11 @@ function buildUserPrompt(
     ? [
       'Extract these fields from the first page of a scanned document.',
       'Images: full first page, the addressee area for By Post / By Hand / Attn, the heading after Dear Sir, then the signature block if detected.',
-      'Organization is the Department line below By Post. Receiver is Attn if present, otherwise the person name below By Hand without Mr./Ms. or parenthetical text. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>. Sender is the printed name immediately below the signature.'
+      'Organization is every full line containing Department that sits below Our Ref and above Dear. Receiver is Attn if present, otherwise the person name below By Hand without Mr./Ms. or parenthetical text. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>. Sender is the printed name immediately below the signature.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Organization is the Department line below By Post. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name below By Hand. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>.'
+      'Organization is every full line containing Department that sits below Our Ref and above Dear. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name below By Hand. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>.'
     ];
 
   const parts = [
@@ -228,7 +228,7 @@ function buildUserPrompt(
   if (organization && organization.trim()) {
     parts.push('', 'Detected Organization:', organization.trim());
   } else {
-    parts.push('', 'Organization is the XXX Department line below By Post.');
+    parts.push('', 'Organization is every full line containing Department below Our Ref and above Dear.');
   }
   parts.push('', SUBJECT_PROMPT);
   if (subjectText && subjectText.trim()) {

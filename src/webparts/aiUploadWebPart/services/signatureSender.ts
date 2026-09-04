@@ -91,24 +91,90 @@ export function extractOrganizationAboveAddressee(page?: IOcrPageResult): string
     return '';
   }
   try {
-    const fromByPost = departmentBelowByPost(page);
-    if (fromByPost) {
-      return fromByPost;
+    const fromWords = departmentsBelowOurRefAboveDear(page);
+    if (fromWords) {
+      return fromWords;
     }
-    return '';
+    return departmentsBelowOurRefAboveDearFromText(page.text || '');
   } catch {
     return '';
   }
 }
 
-function departmentBelowByPost(page: IOcrPageResult): string {
-  const lines = linesBelowDelivery(page, 'post');
-  const departments = lines.filter((line) => isDepartmentLine(line) && !isDirectorLine(line));
-  if (departments.length > 0) {
-    return departments[0];
+function isOurRefLine(line: string): boolean {
+  const key = normalizeKey(line);
+  return key.indexOf('our ref') === 0;
+}
+
+function departmentsBelowOurRefAboveDear(page: IOcrPageResult): string {
+  const lines = groupWordsIntoLines(page.words || []);
+  if (lines.length === 0) {
+    return '';
   }
-  const anyDepartment = lines.filter((line) => isDepartmentLine(line));
-  return anyDepartment.length > 0 ? anyDepartment[0] : '';
+  const dear = findSalutationHit(page.words || []);
+  let ourRef: { y1: number } | undefined;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (!isOurRefLine(line.text)) {
+      continue;
+    }
+    if (dear && line.y0 >= dear.y0) {
+      continue;
+    }
+    ourRef = line;
+    break;
+  }
+  if (!ourRef) {
+    return '';
+  }
+  const hits: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (line.y0 < ourRef.y1 - 2) {
+      continue;
+    }
+    if (dear && line.y1 > dear.y0 + 2) {
+      continue;
+    }
+    if (isOurRefLine(line.text) || isSalutationLine(line.text) || isDeliveryLine(line.text)) {
+      continue;
+    }
+    const text = joinOcrWords(line.words).replace(/\s+/g, ' ').trim();
+    if (!isDepartmentLine(text)) {
+      continue;
+    }
+    hits.push(text);
+  }
+  return hits.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function departmentsBelowOurRefAboveDearFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter((line) => line.length > 0);
+  let ourIndex = -1;
+  let dearIndex = lines.length;
+  for (let index = 0; index < lines.length; index++) {
+    if (ourIndex < 0 && isOurRefLine(lines[index])) {
+      ourIndex = index;
+    }
+    if (isSalutationLine(lines[index])) {
+      dearIndex = index;
+      break;
+    }
+  }
+  if (ourIndex < 0) {
+    return '';
+  }
+  const hits: string[] = [];
+  for (let index = ourIndex + 1; index < dearIndex; index++) {
+    const line = lines[index];
+    if (isOurRefLine(line) || isDeliveryLine(line)) {
+      continue;
+    }
+    if (isDepartmentLine(line)) {
+      hits.push(line);
+    }
+  }
+  return hits.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function receiverBelowByHand(page: IOcrPageResult): string {
