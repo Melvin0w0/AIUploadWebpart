@@ -1,5 +1,5 @@
 import { IOcrPageResult, IOcrWord } from './IPdfOcr';
-import { joinOcrWords } from './ocrSelection';
+import { joinOcrWords, wordsInRect } from './ocrSelection';
 
 interface IInkBand {
   pixels: Uint8ClampedArray;
@@ -47,13 +47,13 @@ export async function analyzeSignature(page?: IOcrPageResult): Promise<ISignatur
         chosen = { region, textBelow, senderName: '' };
       }
     }
-    if (fromClosing) {
-      return {
-        ...chosen,
-        senderName: fromClosing
-      };
+    if (chosen.senderName) {
+      return chosen;
     }
-    return chosen;
+    return {
+      ...chosen,
+      senderName: fromClosing
+    };
   } catch {
     return empty;
   }
@@ -70,13 +70,16 @@ export function extractReceiverAboveDearSir(page?: IOcrPageResult): string {
   try {
     const fromAttn = extractAttnValue(page);
     if (fromAttn) {
-      return fromAttn;
+      const cleaned = cleanReceiverName(fromAttn);
+      if (cleaned) {
+        return cleaned;
+      }
     }
-    const fromWords = addresseeBlockFromWords(page);
-    if (fromWords) {
-      return fromWords;
+    const fromByHand = receiverBelowByHand(page);
+    if (fromByHand) {
+      return fromByHand;
     }
-    return addresseeBlockFromText(page.text || '');
+    return '';
   } catch {
     return '';
   }
@@ -87,21 +90,233 @@ export function extractOrganizationAboveAddressee(page?: IOcrPageResult): string
     return '';
   }
   try {
-    const fromAttn = organizationAboveAttn(page);
-    if (fromAttn) {
-      return fromAttn;
+    const fromByPost = departmentBelowByPost(page);
+    if (fromByPost) {
+      return fromByPost;
     }
-    const fromWords = consecutiveAddresseeLines(page)
-      .map((line) => completeAddresseeLine(page, line))
-      .filter((line) => line.length > 0);
-    const fromBlock = organizationFromLines(fromWords);
-    if (fromBlock) {
-      return fromBlock;
-    }
-    return organizationFromLines(consecutiveBlockFromText(page.text || ''));
+    return '';
   } catch {
     return '';
   }
+}
+
+function departmentBelowByPost(page: IOcrPageResult): string {
+  const lines = linesBelowDelivery(page, 'post');
+  const departments = lines.filter((line) => isDepartmentLine(line) && !isDirectorLine(line));
+  if (departments.length > 0) {
+    return departments[0];
+  }
+  const anyDepartment = lines.filter((line) => isDepartmentLine(line));
+  return anyDepartment.length > 0 ? anyDepartment[0] : '';
+}
+
+function receiverBelowByHand(page: IOcrPageResult): string {
+  const lines = linesBelowDelivery(page, 'hand');
+  for (let index = 0; index < lines.length; index++) {
+    const name = cleanReceiverName(lines[index]);
+    if (name && looksLikePersonName(name)) {
+      return name;
+    }
+  }
+  for (let index = 0; index < lines.length; index++) {
+    const name = cleanReceiverName(lines[index]);
+    if (name && !isDepartmentLine(name) && !isDirectorLine(name) && !isDeliveryLine(name)) {
+      return name;
+    }
+  }
+  return '';
+}
+
+function cleanReceiverName(value: string): string {
+  let text = stripParenthetical(value);
+  text = text
+    .replace(/^(?:(?:mr|mrs|ms|miss|dr|ir|prof(?:essor)?|engr?|sir|madam|mdm|mx|messrs)\b\.?\s*)+/i, '')
+    .replace(/\s*(?:先生|女士|小姐|太太)\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text;
+}
+
+function stripParenthetical(value: string): string {
+  let text = (value || '').trim();
+  let previous = '';
+  while (text !== previous) {
+    previous = text;
+    text = text
+      .replace(/[(\uFF08][^)\uFF09]*[)\uFF09]/g, '')
+      .replace(/[()\uFF08\uFF09]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  return text;
+}
+
+function linesBelowDelivery(page: IOcrPageResult, kind: 'post' | 'hand'): string[] {
+  const hit = findDeliveryHit(page, kind);
+  if (!hit) {
+    return linesBelowDeliveryFromText(page.text || '', kind);
+  }
+  const column = deliveryColumn(page, hit, kind);
+  const dear = findSalutationHit(page.words || []);
+  const stopY = dear ? dear.y0 - 2 : page.height;
+  const columnWords = (page.words || []).filter((word) => {
+    const midX = (word.x0 + word.x1) / 2;
+    return midX >= column.left && midX <= column.right;
+  });
+  const lines = groupWordsIntoLines(columnWords);
+  const collected: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (line.y1 <= hit.y1 - 4) {
+      continue;
+    }
+    if (line.y0 >= stopY) {
+      break;
+    }
+    const text = (line.text || '').replace(/\s+/g, ' ').trim();
+    if (!text || isDeliveryLine(text) || isAttnLine(text) || isSalutationLine(text)) {
+      continue;
+    }
+    collected.push(text);
+    if (collected.length >= 8) {
+      break;
+    }
+  }
+  return collected.length > 0 ? collected : linesBelowDeliveryFromText(page.text || '', kind);
+}
+
+function linesBelowDeliveryFromText(text: string, kind: 'post' | 'hand'): string[] {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter((line) => line.length > 0);
+  const collected: string[] = [];
+  let capturing = false;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (isDeliveryKindLine(line, kind) || (kind === 'post' && isCombinedDeliveryLine(line)) || (kind === 'hand' && isCombinedDeliveryLine(line))) {
+      capturing = true;
+      continue;
+    }
+    if (!capturing) {
+      continue;
+    }
+    if (isSalutationLine(line) || isAttnLine(line) || isDeliveryLine(line)) {
+      break;
+    }
+    const key = normalizeKey(line);
+    if (key.indexOf('our ref') === 0 || key.indexOf('your ref') === 0) {
+      break;
+    }
+    collected.push(line);
+    if (collected.length >= 8) {
+      break;
+    }
+  }
+  return collected;
+}
+
+function findDeliveryHit(
+  page: IOcrPageResult,
+  kind: 'post' | 'hand'
+): { x0: number; y0: number; x1: number; y1: number } | undefined {
+  const words = (page.words || []).slice().sort((left, right) => {
+    if (Math.abs(left.y0 - right.y0) > 8) {
+      return left.y0 - right.y0;
+    }
+    return left.x0 - right.x0;
+  });
+  for (let index = 0; index < words.length; index++) {
+    const key = wordKey(words[index].text || '');
+    const compact = kind === 'post' ? /^byp(o|e)?st$/ : /^byh(a|e)?nd$/;
+    if (compact.test(key)) {
+      return wordBox(words[index]);
+    }
+    if (key !== 'by' && key !== '8y') {
+      continue;
+    }
+    const lineMid = (words[index].y0 + words[index].y1) / 2;
+    const lineHeight = Math.max(10, words[index].y1 - words[index].y0);
+    for (let cursor = index + 1; cursor < Math.min(words.length, index + 5); cursor++) {
+      const next = words[cursor];
+      if (Math.abs((next.y0 + next.y1) / 2 - lineMid) > lineHeight * 0.85) {
+        break;
+      }
+      const nextKey = wordKey(next.text || '');
+      if (kind === 'post' && isPostWord(nextKey)) {
+        return mergeBoxes(wordBox(words[index]), wordBox(next));
+      }
+      if (kind === 'hand' && isHandWord(nextKey)) {
+        return mergeBoxes(wordBox(words[index]), wordBox(next));
+      }
+    }
+  }
+  return undefined;
+}
+
+function deliveryColumn(
+  page: IOcrPageResult,
+  hit: { x0: number; y0: number; x1: number; y1: number },
+  kind: 'post' | 'hand'
+): { left: number; right: number } {
+  const other = findDeliveryHit(page, kind === 'post' ? 'hand' : 'post');
+  if (other && Math.abs(other.y0 - hit.y0) < Math.max(24, (hit.y1 - hit.y0) * 2)) {
+    if (hit.x0 <= other.x0) {
+      return { left: 0, right: (hit.x1 + other.x0) / 2 };
+    }
+    return { left: (other.x1 + hit.x0) / 2, right: page.width };
+  }
+  return {
+    left: Math.max(0, hit.x0 - 28),
+    right: Math.min(page.width, Math.max(hit.x1 + 90, hit.x0 + page.width * 0.45))
+  };
+}
+
+function wordBox(word: IOcrWord): { x0: number; y0: number; x1: number; y1: number } {
+  return { x0: word.x0, y0: word.y0, x1: word.x1, y1: word.y1 };
+}
+
+function mergeBoxes(
+  left: { x0: number; y0: number; x1: number; y1: number },
+  right: { x0: number; y0: number; x1: number; y1: number }
+): { x0: number; y0: number; x1: number; y1: number } {
+  return {
+    x0: Math.min(left.x0, right.x0),
+    y0: Math.min(left.y0, right.y0),
+    x1: Math.max(left.x1, right.x1),
+    y1: Math.max(left.y1, right.y1)
+  };
+}
+
+function isPostWord(key: string): boolean {
+  return key === 'post' || key === 'pest' || key === 'pst' || key === 'postage';
+}
+
+function isHandWord(key: string): boolean {
+  return key === 'hand' || key === 'hnd' || key === 'hands';
+}
+
+function isDeliveryLine(line: string): boolean {
+  return isDeliveryKindLine(line, 'post') || isDeliveryKindLine(line, 'hand') || isCombinedDeliveryLine(line);
+}
+
+function isCombinedDeliveryLine(line: string): boolean {
+  const key = normalizeKey(line);
+  return /\bby\s+hand\b/.test(key) && /\bby\s+post\b/.test(key);
+}
+
+function isDeliveryKindLine(line: string, kind: 'post' | 'hand'): boolean {
+  const key = normalizeKey(line);
+  if (kind === 'post') {
+    return /^by\s+(post|pest|pst)\b/.test(key) || /\bby\s+post\b/.test(key);
+  }
+  return /^by\s+hand\b/.test(key) || /\bby\s+hand\b/.test(key);
+}
+
+function isDepartmentLine(line: string): boolean {
+  const text = (line || '').replace(/\s+/g, ' ').trim();
+  return /\bdepartments?\b/i.test(text) || /(?:署|處)\s*$/.test(text);
+}
+
+function isDirectorLine(line: string): boolean {
+  return /^(?:the\s+)?directors?\b/i.test((line || '').replace(/\s+/g, ' ').trim());
 }
 
 function organizationAboveAttn(page: IOcrPageResult): string {
@@ -219,11 +434,37 @@ export async function extractSubjectBelowDearSir(page?: IOcrPageResult): Promise
   if (!page) {
     return '';
   }
-  const fromLabel = subjectFromReBlock(page);
-  if (fromLabel) {
-    return fromLabel;
+  const fromUnderline = await subjectFromUnderline(page);
+  if (fromUnderline) {
+    return fromUnderline;
   }
-  return subjectFromUnderline(page);
+  return subjectFromReBlock(page);
+}
+
+export function subjectAppearsInPage(page: IOcrPageResult, value: string): boolean {
+  const needle = normalizeSubjectMatch(value);
+  if (needle.length < 4) {
+    return false;
+  }
+  const haystacks = [
+    normalizeSubjectMatch(page.text || ''),
+    normalizeSubjectMatch(joinOcrWords(page.words || []))
+  ];
+  for (let index = 0; index < haystacks.length; index++) {
+    if (haystacks[index].indexOf(needle) >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeSubjectMatch(text: string): string {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201c\u201d']/g, '')
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function dearSirBandRegion(page?: IOcrPageResult): ISignatureRegion | undefined {
@@ -231,19 +472,23 @@ export function dearSirBandRegion(page?: IOcrPageResult): ISignatureRegion | und
     return undefined;
   }
   const hit = findSalutationHit(page.words || []);
+  const closing = findClosingHit(page.words || []);
   if (!hit) {
     return {
       x0: 0,
       y0: Math.round(page.height * 0.12),
       x1: Math.round(page.width * 0.96),
-      y1: Math.round(page.height * 0.68)
+      y1: closing ? Math.max(8, closing.y0) : Math.round(page.height * 0.68)
     };
   }
+  const y1 = closing
+    ? Math.max(hit.y1 + 8, closing.y0)
+    : Math.min(page.height, Math.max(hit.y1 + Math.max(160, page.height * 0.42), page.height * 0.68));
   return {
     x0: 0,
-    y0: Math.max(0, hit.y0 - Math.max(140, page.height * 0.28)),
+    y0: hit.y1,
     x1: Math.round(page.width * 0.96),
-    y1: Math.min(page.height, Math.max(hit.y1 + Math.max(160, page.height * 0.42), page.height * 0.68))
+    y1: Math.min(page.height, y1)
   };
 }
 
@@ -563,7 +808,7 @@ function consecutiveLinesFromList(lines: string[]): string[] {
   return block;
 }
 
-function groupWordsIntoLines(words: IOcrWord[]): { text: string; y0: number; y1: number }[] {
+function groupWordsIntoLines(words: IOcrWord[]): { text: string; x0: number; x1: number; y0: number; y1: number }[] {
   const sorted = words.slice().sort((left, right) => {
     if (Math.abs(left.y0 - right.y0) > 8) {
       return left.y0 - right.y0;
@@ -587,14 +832,20 @@ function groupWordsIntoLines(words: IOcrWord[]): { text: string; y0: number; y1:
     groups.push([word]);
   });
   return groups.map((group) => {
+    let x0 = group[0].x0;
+    let x1 = group[0].x1;
     let y0 = group[0].y0;
     let y1 = group[0].y1;
     group.forEach((word) => {
+      x0 = Math.min(x0, word.x0);
+      x1 = Math.max(x1, word.x1);
       y0 = Math.min(y0, word.y0);
       y1 = Math.max(y1, word.y1);
     });
     return {
       text: joinOcrWords(group).replace(/\s+/g, ' ').trim(),
+      x0,
+      x1,
       y0,
       y1
     };
@@ -634,11 +885,11 @@ async function subjectFromUnderline(page: IOcrPageResult): Promise<string> {
     canvas.width = 0;
     canvas.height = 0;
 
-    const reLine = chooseReLine(page);
     const dear = findSalutationHit(page.words || []);
+    const closing = findClosingHit(page.words || []);
     const ink: IInkBand = { pixels, width, height, x0, y0 };
-    const reY = reLine ? reLine.y0 : -1;
     const dearY = dear ? dear.y1 : -1;
+    const closingY = closing ? closing.y0 : -1;
     const thresholds = [110, 130, 150, 175, 195];
     for (let index = 0; index < thresholds.length; index++) {
       const found = headingsFromUnderlinePixels(
@@ -651,8 +902,8 @@ async function subjectFromUnderline(page: IOcrPageResult): Promise<string> {
         image.width,
         image.height,
         thresholds[index],
-        reY,
         dearY,
+        closingY,
         ink
       );
       if (found) {
@@ -675,87 +926,105 @@ function headingsFromUnderlinePixels(
   pageWidth: number,
   pageHeight: number,
   maxLum: number,
-  reY: number,
   dearY: number,
-  ink: IInkBand
+  closingY: number,
+  _ink: IInkBand
 ): string {
-  const maxUnderlineHeight = Math.max(18, Math.round(pageHeight * 0.012));
-  const fragments: { y: number; left: number; right: number }[] = [];
-  for (let row = 0; row < height; row++) {
-    const spans = darkSpansOnRow(pixels, width, row, maxLum);
-    for (let spanIndex = 0; spanIndex < spans.length; spanIndex++) {
-      const span = spans[spanIndex];
-      const pageLeft = x0 + span.left;
-      const pageRight = x0 + span.right;
-      const spanWidth = pageRight - pageLeft;
-      if (spanWidth < Math.max(10, pageWidth * 0.02) || spanWidth > pageWidth * 0.94) {
-        continue;
-      }
-      fragments.push({ y: y0 + row, left: pageLeft, right: pageRight });
+  const pageWords = page.words || [];
+  const lines = groupWordsIntoLines(pageWords);
+  const underlined: { words: IOcrWord[]; y0: number; y1: number }[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (dearY >= 0 && line.y1 <= dearY) {
+      continue;
     }
+    if (closingY >= 0 && line.y0 >= closingY) {
+      continue;
+    }
+    if (isSalutationLine(line.text) || isClosingLine(line.text) || isAddressBlockStop(line.text)) {
+      continue;
+    }
+    const span = underlineSpanUnderLine(line, pixels, x0, y0, width, height, maxLum);
+    if (!span) {
+      continue;
+    }
+    const indexes = wordsInRect(pageWords, {
+      x0: x0 + span.left - 2,
+      y0: line.y0 - 2,
+      x1: x0 + span.right + 2,
+      y1: line.y1 + 2
+    });
+    const lineHeight = Math.max(8, line.y1 - line.y0);
+    const words = indexes
+      .map((wordIndex) => pageWords[wordIndex])
+      .filter((word) => !!word && Math.abs(word.y0 - line.y0) <= lineHeight * 0.5);
+    if (words.length === 0) {
+      continue;
+    }
+    const text = stripSubjectLabel(joinOcrWords(words));
+    if (!looksLikeUnderlinedSubject(text)) {
+      continue;
+    }
+    underlined.push({ words, y0: line.y0, y1: line.y1 });
   }
 
-  const clustered = clusterUnderlineFragments(fragments, maxUnderlineHeight);
-  const candidates: { line: string; y: number; score: number }[] = [];
-  for (let index = 0; index < clustered.length; index++) {
-    const cluster = clustered[index];
-    if (cluster.y1 - cluster.y0 > maxUnderlineHeight) {
-      continue;
-    }
-    if (cluster.y1 < pageHeight * 0.12 && !(reY >= 0 && cluster.y1 >= reY - 4)) {
-      continue;
-    }
-    const underline = { y: cluster.y1, left: cluster.left, right: cluster.right };
-    const words = wordsSittingOnUnderline(page, underline);
-    const chosen = preferBoldWords(words, ink);
-    const line = stripSubjectLabel(joinOcrWords(chosen.length > 0 ? chosen : words));
-    if (!looksLikeSubjectHeading(line)) {
-      continue;
-    }
-    const density = averageInkDensity(ink, chosen.length > 0 ? chosen : words);
-    const pageMid = pageHeight * 0.42;
-    const centerX = pageWidth * 0.5;
-    const midX = (cluster.left + cluster.right) / 2;
-    const length = line.length;
-    const lengthScore = length >= 8 && length <= 100
-      ? 48 - Math.abs(length - 40) * 0.4
-      : length > 100
-        ? Math.max(0, 24 - (length - 100) * 0.25)
-        : length * 2;
-    let score = lengthScore + density * 80;
-    if (reY >= 0 && cluster.y1 >= reY - 8 && cluster.y1 <= reY + pageHeight * 0.36) {
-      score += 50;
-    }
-    if (dearY >= 0 && cluster.y1 >= dearY - 6) {
-      score += 20;
-    }
-    score += Math.max(0, 24 - Math.abs(cluster.y1 - pageMid) / pageHeight * 70);
-    if (Math.abs(midX - centerX) < pageWidth * 0.28) {
-      score += 12;
-    }
-    candidates.push({ line, y: cluster.y1, score });
-  }
-
-  if (candidates.length === 0) {
+  if (underlined.length === 0) {
     return '';
   }
 
-  const groups: { lines: string[]; score: number; y1: number }[] = [];
-  const groupGap = Math.max(40, pageHeight * 0.03);
-  candidates.forEach((item) => {
+  const groupGap = Math.max(20, pageHeight * 0.018);
+  const groups: { words: IOcrWord[]; y1: number }[] = [];
+  underlined.forEach((item) => {
     const last = groups[groups.length - 1];
-    if (last && item.y - last.y1 <= groupGap && last.lines.length < 3) {
-      if (last.lines.indexOf(item.line) < 0) {
-        last.lines.push(item.line);
-      }
-      last.score += item.score;
-      last.y1 = item.y;
+    if (last && item.y0 - last.y1 <= groupGap) {
+      last.words = last.words.concat(item.words);
+      last.y1 = item.y1;
       return;
     }
-    groups.push({ lines: [item.line], score: item.score, y1: item.y });
+    groups.push({ words: item.words.slice(), y1: item.y1 });
   });
-  groups.sort((left, right) => right.score - left.score);
-  return groups[0].lines.join(' ').trim();
+  return stripSubjectLabel(joinOcrWords(groups[0].words)).replace(/\s+/g, ' ').trim();
+}
+
+function underlineSpanUnderLine(
+  line: { x0: number; x1: number; y0: number; y1: number },
+  pixels: Uint8ClampedArray,
+  bandX0: number,
+  bandY0: number,
+  bandWidth: number,
+  bandHeight: number,
+  maxLum: number
+): { left: number; right: number } | undefined {
+  const lineHeight = Math.max(8, line.y1 - line.y0);
+  const row0 = Math.floor(line.y1 - bandY0);
+  const row1 = Math.floor(line.y1 - bandY0 + Math.max(4, lineHeight * 0.4));
+  const col0 = Math.floor(line.x0 - bandX0);
+  const col1 = Math.floor(line.x1 - bandX0);
+  if (col1 - col0 < 8) {
+    return undefined;
+  }
+
+  let best: { left: number; right: number; overlap: number } | undefined;
+  const lineWidth = col1 - col0;
+  for (let row = row0; row <= row1; row++) {
+    if (row < 0 || row >= bandHeight) {
+      continue;
+    }
+    const spans = darkSpansOnRow(pixels, bandWidth, row, maxLum);
+    for (let spanIndex = 0; spanIndex < spans.length; spanIndex++) {
+      const span = spans[spanIndex];
+      const left = Math.max(col0 - 6, span.left);
+      const right = Math.min(col1 + 6, span.right);
+      const overlap = right - left;
+      if (overlap < lineWidth * 0.35) {
+        continue;
+      }
+      if (!best || overlap > best.overlap) {
+        best = { left: span.left, right: span.right, overlap };
+      }
+    }
+  }
+  return best ? { left: best.left, right: best.right } : undefined;
 }
 
 function clusterUnderlineFragments(
@@ -800,20 +1069,16 @@ function clusterUnderlineFragments(
 function subjectScanBand(page: IOcrPageResult, width: number, height: number): ISignatureRegion {
   const hit = findSalutationHit(page.words || []);
   const closing = findClosingHit(page.words || []);
-  const reTop = reLabelTop(page);
-  const linePad = Math.max(10, Math.round(height * 0.014));
-  let y0 = height * 0.14;
+  const linePad = Math.max(4, Math.round(height * 0.006));
+  let y0 = height * 0.22;
   if (hit) {
-    y0 = hit.y0 - linePad;
-  }
-  if (reTop >= 0) {
-    y0 = Math.min(y0, reTop - linePad);
+    y0 = hit.y1 + linePad;
   }
   y0 = Math.max(0, Math.floor(y0));
-  const y1 = Math.min(
-    Math.floor(height * 0.88),
-    closing ? Math.max(y0 + 8, closing.y1 - 24) : Math.floor(height * 0.86)
-  );
+  let y1 = Math.floor(height * 0.88);
+  if (closing) {
+    y1 = Math.min(y1, Math.floor(closing.y0 - linePad));
+  }
   return {
     x0: Math.floor(width * 0.04),
     y0,
@@ -918,23 +1183,6 @@ function mergeCloseSpans(
   return merged;
 }
 
-function wordsSittingOnUnderline(
-  page: IOcrPageResult,
-  underline: { y: number; left: number; right: number }
-): IOcrWord[] {
-  const pad = Math.max(12, (underline.right - underline.left) * 0.1);
-  return (page.words || []).filter((word) => {
-    const midX = (word.x0 + word.x1) / 2;
-    const height = Math.max(8, word.y1 - word.y0);
-    const above = Math.max(36, height * 2.2);
-    const below = Math.max(10, height * 0.7);
-    return midX >= underline.left - pad &&
-      midX <= underline.right + pad &&
-      word.y0 <= underline.y + 6 &&
-      word.y1 >= underline.y - above &&
-      word.y1 <= underline.y + below;
-  });
-}
 
 function preferBoldWords(words: IOcrWord[], ink?: IInkBand): IOcrWord[] {
   if (!ink || words.length < 2) {
@@ -989,6 +1237,21 @@ function wordInkDensity(ink: IInkBand, word: IOcrWord): number {
   return total > 0 ? dark / total : 0;
 }
 
+function looksLikeUnderlinedSubject(line: string): boolean {
+  const trimmed = (line || '').trim();
+  const letters = trimmed.replace(/[\s_\-.=]/g, '');
+  if (letters.length < 2 || trimmed.length > 220) {
+    return false;
+  }
+  if (/^[_.=-]{3,}$/.test(trimmed)) {
+    return false;
+  }
+  if (isSalutationLine(trimmed) || isClosingLine(trimmed) || isAddressBlockStop(trimmed)) {
+    return false;
+  }
+  return true;
+}
+
 function looksLikeSubjectHeading(line: string): boolean {
   const trimmed = (line || '').trim();
   const letters = trimmed.replace(/[\s_\-.=]/g, '');
@@ -1025,28 +1288,25 @@ function subjectFromReWords(page: IOcrPageResult): string {
     return '';
   }
   const dear = findSalutationHit(page.words || []);
+  const closing = findClosingHit(page.words || []);
   const hits: number[] = [];
   for (let index = 0; index < lines.length; index++) {
-    if (matchReLabel(lines[index].text) !== undefined) {
-      hits.push(index);
+    if (matchReLabel(lines[index].text) === undefined) {
+      continue;
     }
+    const line = lines[index];
+    if (dear && line.y1 <= dear.y1 - 2) {
+      continue;
+    }
+    if (closing && line.y0 >= closing.y0 - 2) {
+      continue;
+    }
+    hits.push(index);
   }
   if (hits.length === 0) {
     return '';
   }
-  let chosen = hits[0];
-  if (dear) {
-    const below = hits.filter((index) => lines[index].y0 >= dear.y1 - 6);
-    if (below.length > 0) {
-      chosen = below[0];
-    } else {
-      const above = hits.filter((index) => lines[index].y1 <= dear.y0 + 6);
-      if (above.length > 0) {
-        chosen = above[above.length - 1];
-      }
-    }
-  }
-  return collectReContinuation(lines, chosen, dear ? dear.y0 : -1);
+  return collectReContinuation(lines, hits[0], dear ? dear.y0 : -1);
 }
 
 function subjectFromReText(text: string): string {
@@ -1058,14 +1318,19 @@ function subjectFromReText(text: string): string {
     }
   }
   let dearIndex = -1;
+  let closingIndex = compact.length;
   for (let index = 0; index < compact.length; index++) {
-    if (isSalutationLine(compact[index].text)) {
+    if (dearIndex < 0 && isSalutationLine(compact[index].text)) {
       dearIndex = index;
+    }
+    if (isClosingLine(compact[index].text)) {
+      closingIndex = index;
       break;
     }
   }
   const hits: number[] = [];
-  for (let index = 0; index < compact.length; index++) {
+  const start = dearIndex >= 0 ? dearIndex : 0;
+  for (let index = start; index < closingIndex; index++) {
     if (matchReLabel(compact[index].text) !== undefined) {
       hits.push(index);
     }
@@ -1073,24 +1338,12 @@ function subjectFromReText(text: string): string {
   if (hits.length === 0) {
     return '';
   }
-  let chosen = hits[0];
-  if (dearIndex >= 0) {
-    const below = hits.filter((index) => index >= dearIndex);
-    if (below.length > 0) {
-      chosen = below[0];
-    } else {
-      const above = hits.filter((index) => index < dearIndex);
-      if (above.length > 0) {
-        chosen = above[above.length - 1];
-      }
-    }
-  }
-  const mapped = compact.map((line, index) => ({
+  const mapped = compact.map((line) => ({
     text: line.text,
     y0: line.sourceIndex,
     y1: line.sourceIndex
   }));
-  return collectReContinuation(mapped, chosen, dearIndex >= 0 ? compact[dearIndex].sourceIndex : -1);
+  return collectReContinuation(mapped, hits[0], dearIndex);
 }
 
 function matchReLabel(line: string): { value: string } | undefined {
@@ -1428,7 +1681,7 @@ function pickNameAboveTitle(lines: { text: string; y0: number }[]): string {
     return '';
   }
   found.sort((left, right) => left.y0 - right.y0);
-  return found[0].name;
+  return found[found.length - 1].name;
 }
 
 function candidateNamesFromLine(line: string): string[] {
@@ -1571,7 +1824,7 @@ function isIgnorableParen(value: string): boolean {
     key === 'seal';
 }
 
-function findClosingHit(words: IOcrWord[]): { x0: number; y1: number } | undefined {
+function findClosingHit(words: IOcrWord[]): { x0: number; y0: number; y1: number } | undefined {
   const sorted = words.slice().sort((left, right) => {
     if (Math.abs(left.y0 - right.y0) > 10) {
       return left.y0 - right.y0;
@@ -1587,12 +1840,14 @@ function findClosingHit(words: IOcrWord[]): { x0: number; y1: number } | undefin
       continue;
     }
     let x0 = sameLine[0].x0;
+    let y0 = sameLine[0].y0;
     let y1 = sameLine[0].y1;
     sameLine.forEach((word) => {
       x0 = Math.min(x0, word.x0);
+      y0 = Math.min(y0, word.y0);
       y1 = Math.max(y1, word.y1);
     });
-    return { x0, y1 };
+    return { x0, y0, y1 };
   }
   return undefined;
 }

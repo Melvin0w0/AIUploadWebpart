@@ -12,6 +12,19 @@ export function isAiExtractionConfigured(config: IAiExtractionConfig): boolean {
   return config.endpoint.trim().length > 0 && config.apiKey.trim().length > 0;
 }
 
+const SUBJECT_PROMPT: string = [
+  'Strictly extract content from the letter body ONLY, which is the text that appears AFTER the salutation (Dear Sir / Dear Madam / Dear Sir or Madam / etc.) and BEFORE the closing (Yours faithfully / Yours sincerely / Yours truly).',
+  '',
+  'Primary instruction (must follow first):',
+  '- Locate and copy the entire underlined passage in that body section as one continuous block.',
+  '- Do not stop at the first line after the salutation. Scan the whole body for any underlined text.',
+  '',
+  'Fallback (only if there is absolutely no underline anywhere in the body):',
+  '- Then extract the Re: or Subject: line that appears in the same body range.',
+  '',
+  'Do not include the salutation or the closing in the result.'
+].join('\n');
+
 export async function extractFieldsWithAi(
   ocrText: string,
   fieldLabels: string[],
@@ -123,7 +136,7 @@ function buildRequest(
     messages: [
       {
         role: 'system',
-        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. Organization: if Attn: is present, copy ONLY the first complete line immediately above Attn. If there is no Attn:, copy ONLY the first complete line of the consecutive block immediately above Dear Sir, starting at the first line that begins with an English letter. Do not include the Attn line itself. Sender is the printed person name below Yours sincerely or Yours faithfully and above the job title. If two names appear there, use the upper name, never the job title such as Chief Engineer or Director. Receiver is the value after Attn: if present; otherwise ONLY the first line of the consecutive lines immediately above Dear Sir. Do not include titles such as Mr., Ms., Mrs., Miss, Dr., or Ir. Subject is the full consecutive block after Subject: or Re:, including wrapped following lines, omitting the label itself. If there is no Subject: or Re:, copy the underlined heading in the middle of the letter. Do not copy the letter body after that block. Ref No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref. Do not invent values.'
+        content: 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. Organization is the line ending with Department that appears below By Post. Sender is the printed person name immediately below the handwritten signature, not the job title. Receiver is the value after Attn: if present; if there is no Attn, it is the person name below By Hand. Omit Mr., Ms., Mrs., Miss, and any parenthetical text. Subject:\n' + SUBJECT_PROMPT + '\nRef No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref. Do not invent values.'
       },
       {
         role: 'user',
@@ -157,10 +170,10 @@ function buildUserPrompt(
     'Leading BL: leading business line. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water. Abbreviations such as ARC, BEG, ENV, GEO, ISD, LSM, MEP, PCM, PCC, TRA, UNC, UAP, WAT are also accepted. If an AECOM business-line logo or name is visible, select that listed value.',
     'Project Number: the 8 digits immediately before the slash in Our Ref: / Our Ref :. For example Our Ref: 12345678/ABC -> 12345678. Digits only. Do not use Your Ref.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
-    'Organization: if Attn: / Attention: is present, copy ONLY the first complete line immediately above that Attn line, not the Attn line itself. If there is no Attn:, copy ONLY the first complete line of the consecutive block immediately above Dear Sir that begins with an English letter. Skip lines that start with a symbol. Do not include Dear Sir or the letterhead at the top of the page.',
-    'Sender: below Yours sincerely / Yours faithfully / Yours truly, and above the job title (for example Chief Engineer, Director, Manager), copy the printed person name. If two names appear in that block, copy the upper name, not the job title. Do not copy Chief Engineer, Director, Manager, or similar titles. Do not include parentheses. If that name is in parentheses, copy the inside text only. Skip (signed), the job title, and the company name. OCR may read sincerely as sincerelt.',
-    'Receiver: if the page has Attn: / Attn : / Attention:, copy only the value after that label. If there is no Attn:, use the first of the consecutive lines immediately above Dear Sir. Do not include parentheses. Do not include titles such as Mr., Ms., Mrs., Miss, Dr., or Ir. Do not copy later address lines, Dear Sir, Our Ref, or the date.',
-    'Subject: copy the full consecutive block after Subject: or Re:, including wrapped following lines. Omit the Subject: / Re: label itself. Stop before Dear Sir and before the letter body (I refer / We / Please). If there is no Subject: or Re:, copy the underlined heading in the middle of the letter.',
+    'Organization: copy the XXX Department line below By Post / By Post:. For example Highways Department. Do not copy Director of ... unless that line itself is the Department name. Do not use the letterhead.',
+    'Sender: copy the printed person name immediately below the handwritten signature. If two names appear under Yours faithfully, use the lower name that sits just above the job title. Do not copy Chief Engineer, Director, Manager, or similar titles. Skip (signed).',
+    'Receiver: if Attn: / Attn : / Attention: is present, copy only the value after that label. If there is no Attn, copy the person name below By Hand. Do not include Mr., Ms., Mrs., Miss, Dr., or Ir. Delete any parentheses and the text inside them. Do not copy Department lines.',
+    'Subject:\n' + SUBJECT_PROMPT,
     'File No: file number',
     'Ref No: copy the value to the right of Our Ref: / Our Ref :. If there is no Our Ref, copy the value to the right of a standalone Ref: / Ref :. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
     'Issue Date: the document date in dd/MM/yyyy, for example 03/09/2026.',
@@ -174,12 +187,12 @@ function buildUserPrompt(
   const sourceLines = hasImage
     ? [
       'Extract these fields from the first page of a scanned document.',
-      'Images: full first page, the Dear Sir area for Organization and Receiver, the opening body for the underlined Subject, then the signature block if detected.',
-      'For Organization, if Attn: is present copy ONLY the first complete line immediately above Attn; if not, copy ONLY the first complete line immediately above Dear Sir that begins with an English letter. For Receiver, prefer the value after Attn: if present; otherwise copy only the first of those consecutive lines. For Subject, copy the full block after Subject: or Re:, including wrapped lines; if there is no such label, copy the underlined heading. For Sender, copy the person name below Yours sincerely / Yours faithfully and above the job title; if two names appear, copy the upper one.'
+      'Images: full first page, the addressee area for By Post / By Hand / Attn, the heading after Dear Sir, then the signature block if detected.',
+      'Organization is the Department line below By Post. Receiver is Attn if present, otherwise the person name below By Hand without Mr./Ms. or parenthetical text. Subject: scan the whole letter body after the salutation for the entire underlined block; do not stop at the first line. Sender is the printed name immediately below the signature.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Organization: if Attn: is present, copy ONLY the first complete line immediately above Attn; otherwise ONLY the first complete line immediately above Dear Sir. Sender is the person name below Yours sincerely or Yours faithfully and above the job title. Receiver is the value after Attn: if present, otherwise the first of those consecutive lines. Subject is the full block after Subject: or Re:, or the underlined heading if those labels are missing.'
+      'Organization is the Department line below By Post. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name below By Hand. Subject: scan the whole letter body after the salutation for the entire underlined block; do not stop at the first line.'
     ];
 
   const parts = [
@@ -194,26 +207,25 @@ function buildUserPrompt(
     ocrText || '(none)'
   ];
   if (signature && signature.senderName) {
-    parts.push('', 'Detected Sender from the name below Yours sincerely/faithfully and above the job title:', signature.senderName);
+    parts.push('', 'Detected Sender from the printed name below the signature:', signature.senderName);
   } else if (signature && signature.textBelow) {
     parts.push('', 'OCR immediately below the signature:', signature.textBelow);
   } else {
-    parts.push('', 'Look below Yours sincerely / Yours faithfully for the person name above the job title. That is Sender.');
+    parts.push('', 'Look below the handwritten signature for the printed person name. That is Sender.');
   }
   if (receiverName && receiverName.trim()) {
     parts.push('', 'Detected Receiver:', receiverName.trim());
   } else {
-    parts.push('', 'If Attn: is present, Receiver is the value after Attn:. If not, Receiver is the first of the consecutive lines immediately above Dear Sir.');
+    parts.push('', 'If Attn: is present, Receiver is the value after Attn:. If not, Receiver is the person name below By Hand, without Mr./Ms. or parenthetical text.');
   }
   if (organization && organization.trim()) {
     parts.push('', 'Detected Organization:', organization.trim());
   } else {
-    parts.push('', 'If Attn: is present, Organization is ONLY the first complete line immediately above Attn. If not, Organization is the first complete English line immediately above Dear Sir.');
+    parts.push('', 'Organization is the XXX Department line below By Post.');
   }
+  parts.push('', SUBJECT_PROMPT);
   if (subjectText && subjectText.trim()) {
-    parts.push('', 'Detected Subject from the full Re: / Subject: block or underlined heading:', subjectText.trim());
-  } else {
-    parts.push('', 'Copy the full consecutive block after Subject: or Re:, including wrapped lines. If those labels are missing, copy the underlined heading in the middle of the letter.');
+    parts.push('', 'OCR underlined candidate only. Follow the Subject rules above; scan the whole body and do not stop at the first line after the salutation:', subjectText.trim());
   }
   if (refNo && refNo.trim()) {
     parts.push('', 'Detected Ref No from Our Ref: or standalone Ref:', refNo.trim());
@@ -269,7 +281,7 @@ async function buildPageImages(
         images.push({
           url: crop,
           detail: 'high',
-          label: 'Letter body. Organization: if Attn: is present, copy ONLY the first complete line immediately above Attn; otherwise the first complete line above Dear Sir. Receiver is the first of those lines unless Attn: is present. Subject is the full block after Subject: or Re:, including wrapped lines:'
+          label: 'Letter body AFTER the salutation and BEFORE the closing. Subject: scan this whole body for the entire underlined block; do not stop at the first line. Fallback only if there is no underline: Re: or Subject: line:'
         });
       }
     }
@@ -291,7 +303,7 @@ async function buildPageImages(
         images.push({
           url: crop,
           detail: 'high',
-          label: 'Closing block. Sender is the person name below Yours sincerely/faithfully and above the job title:'
+          label: 'Closing block. Sender is the printed person name immediately below the handwritten signature:'
         });
       }
     }

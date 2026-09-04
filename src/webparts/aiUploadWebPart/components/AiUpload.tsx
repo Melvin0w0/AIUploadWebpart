@@ -55,7 +55,7 @@ import {
 } from '../constants/yesNo';
 import { extractFieldValues, extractOurRefNo, extractOurRefOnly } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
-import { analyzeSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir } from '../services/signatureSender';
+import { analyzeSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir, subjectAppearsInPage } from '../services/signatureSender';
 import { SharePointUploadService } from '../services/SharePointUploadService';
 import {
   buildUploadFolderUrl,
@@ -1438,7 +1438,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           value = receiverName || fromAi;
         } else if (isSubjectField(field.label)) {
           const aiSubject = (aiValue || '').trim();
-          value = subjectText || aiSubject;
+          const groundedAi = firstPage && aiSubject && subjectAppearsInPage(firstPage, aiSubject)
+            ? aiSubject
+            : '';
+          value = subjectText || groundedAi;
         } else if (isRefNoField(field.label)) {
           value = refNo || (aiValue || '').trim();
         } else if (isProjectNumberField(field.label)) {

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { IOcrPageResult } from '../services/IPdfOcr';
-import { joinOcrWords, wordIndexAtPoint, wordsInTextRange } from '../services/ocrSelection';
+import { joinOcrWords, wordIndexAtPoint, wordsInRect, wordsInTextRange } from '../services/ocrSelection';
 import styles from './AiUpload.module.scss';
 
 export interface IPdfHighlightViewerProps {
@@ -191,12 +191,18 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
     const words = page.words || [];
     const movement = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
 
-    let indexes: number[];
+    let highlightIndexes: number[];
+    let valueIndexes: number[];
     if (movement < 4) {
       const wordIndex = wordIndexAtPoint(words, endX, endY);
-      indexes = wordIndex >= 0 ? [wordIndex] : [];
+      highlightIndexes = wordIndex >= 0 ? [wordIndex] : [];
+      valueIndexes = highlightIndexes;
     } else {
-      indexes = wordsInTextRange(words, startX, startY, endX, endY);
+      highlightIndexes = wordsInTextRange(words, startX, startY, endX, endY);
+      valueIndexes = wordsInRect(words, { x0: startX, y0: startY, x1: endX, y1: endY });
+      if (valueIndexes.length === 0) {
+        valueIndexes = highlightIndexes;
+      }
     }
 
     this.setState({
@@ -205,9 +211,9 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
       currentY: endY
     });
 
-    if (indexes.length > 0) {
-      const selectedWords = indexes.map((index) => words[index]).filter((word) => !!word);
-      onSelectText(joinOcrWords(selectedWords), indexes);
+    if (valueIndexes.length > 0) {
+      const selectedWords = valueIndexes.map((index) => words[index]).filter((word) => !!word);
+      onSelectText(joinOcrWords(selectedWords), highlightIndexes);
     }
   };
 }
