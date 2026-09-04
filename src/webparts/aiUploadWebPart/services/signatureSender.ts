@@ -1,5 +1,6 @@
 import { IOcrPageResult, IOcrWord } from './IPdfOcr';
 import { joinOcrWords } from './ocrSelection';
+import { SUBJECT } from './ocrWordStyles';
 
 interface IInkBand {
   pixels: Uint8ClampedArray;
@@ -433,6 +434,10 @@ function organizationFromLines(lines: string[]): string {
 export async function extractSubjectBelowDearSir(page?: IOcrPageResult): Promise<string> {
   if (!page) {
     return '';
+  }
+  const fromBoldAndUnderline = subjectFromBoldAndUnderlinedLines(page);
+  if (fromBoldAndUnderline) {
+    return fromBoldAndUnderline;
   }
   const fromFirstUnderline = subjectFromFirstUnderlinedLine(page);
   if (fromFirstUnderline) {
@@ -870,13 +875,30 @@ function lineHasUnderline(line: { words: IOcrWord[] }): boolean {
   return false;
 }
 
-function subjectFromFirstUnderlinedLine(page: IOcrPageResult): string {
+function lineHasBold(line: { words: IOcrWord[] }): boolean {
+  for (let index = 0; index < line.words.length; index++) {
+    if (line.words[index].bold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function lineHasBoldAndUnderline(line: { words: IOcrWord[] }): boolean {
+  return lineHasUnderline(line) && lineHasBold(line);
+}
+
+function collectBodyLines(
+  page: IOcrPageResult,
+  accept: (line: { words: IOcrWord[]; text: string }) => boolean,
+  joinNearby?: boolean
+): string {
   const pageWords = page.words || [];
   const lines = groupWordsIntoLines(pageWords);
   const dear = findSalutationHit(pageWords);
   const closing = findClosingHit(pageWords);
-  const block: IOcrWord[] = [];
-  let collecting = false;
+  const maxGap = joinNearby ? Math.max(0, SUBJECT.maxLineGap) : 0;
+  const kept: { words: IOcrWord[]; y1: number }[] = [];
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     if (dear && line.y1 <= dear.y1) {
@@ -885,27 +907,40 @@ function subjectFromFirstUnderlinedLine(page: IOcrPageResult): string {
     if (closing && line.y0 >= closing.y0) {
       break;
     }
-    if (isSalutationLine(line.text) || isClosingLine(line.text)) {
-      if (collecting) {
-        break;
-      }
+    if (isSalutationLine(line.text) || isClosingLine(line.text) || isDeliveryLine(line.text)) {
       continue;
     }
-    if (!lineHasUnderline(line)) {
-      if (collecting) {
+    if (kept.length > 0) {
+      const gap = line.y0 - kept[kept.length - 1].y1;
+      if (gap > maxGap) {
         break;
       }
+    }
+    if (!accept(line)) {
       continue;
     }
-    collecting = true;
-    for (let wordIndex = 0; wordIndex < line.words.length; wordIndex++) {
-      block.push(line.words[wordIndex]);
+    kept.push({ words: line.words, y1: line.y1 });
+    if (!joinNearby) {
+      break;
     }
   }
-  if (block.length === 0) {
+  if (kept.length === 0) {
     return '';
   }
-  return stripSubjectLabel(joinOcrWords(block)).replace(/\s+/g, ' ').trim();
+  return kept
+    .map((item) => stripSubjectLabel(joinOcrWords(item.words)).replace(/\s+/g, ' ').trim())
+    .filter((text) => text.length > 0)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function subjectFromBoldAndUnderlinedLines(page: IOcrPageResult): string {
+  return collectBodyLines(page, lineHasBoldAndUnderline, true);
+}
+
+function subjectFromFirstUnderlinedLine(page: IOcrPageResult): string {
+  return collectBodyLines(page, lineHasUnderline);
 }
 
 function subjectFromStyledWords(page: IOcrPageResult, style: 'underline' | 'bold'): string {
@@ -922,7 +957,7 @@ function subjectFromStyledWords(page: IOcrPageResult, style: 'underline' | 'bold
     if (closing && line.y0 >= closing.y0) {
       continue;
     }
-    if (isSalutationLine(line.text) || isClosingLine(line.text) || isAddressBlockStop(line.text)) {
+    if (isSalutationLine(line.text) || isClosingLine(line.text) || isAddressBlockStop(line.text) || isDeliveryLine(line.text)) {
       continue;
     }
     const styled = style === 'underline'
@@ -1039,8 +1074,6 @@ function headingsFromUnderlinePixels(
 ): string {
   const pageWords = page.words || [];
   const lines = groupWordsIntoLines(pageWords);
-  const block: IOcrWord[] = [];
-  let collecting = false;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     if (dearY >= 0 && line.y1 <= dearY) {
@@ -1049,40 +1082,27 @@ function headingsFromUnderlinePixels(
     if (closingY >= 0 && line.y0 >= closingY) {
       break;
     }
-    if (isSalutationLine(line.text) || isClosingLine(line.text) || isAddressBlockStop(line.text)) {
-      if (collecting) {
-        break;
-      }
+    if (isSalutationLine(line.text) || isClosingLine(line.text) || isAddressBlockStop(line.text) || isDeliveryLine(line.text)) {
       continue;
     }
     const span = underlineSpanUnderLine(line, pixels, x0, y0, width, height, maxLum);
     if (!span) {
-      if (collecting) {
-        break;
-      }
       continue;
     }
     const text = stripSubjectLabel(line.text);
     if (!looksLikeUnderlinedSubject(text)) {
-      if (collecting) {
-        break;
-      }
       continue;
     }
-    collecting = true;
     line.words.forEach((word) => {
       const overlapLeft = Math.max(x0 + span.left, word.x0);
       const overlapRight = Math.min(x0 + span.right, word.x1);
       if (overlapRight - overlapLeft >= Math.max(4, (word.x1 - word.x0) * 0.25)) {
         word.underline = true;
       }
-      block.push(word);
     });
+    return stripSubjectLabel(joinOcrWords(line.words)).replace(/\s+/g, ' ').trim();
   }
-  if (block.length === 0) {
-    return '';
-  }
-  return stripSubjectLabel(joinOcrWords(block)).replace(/\s+/g, ' ').trim();
+  return '';
 }
 
 function underlineSpanUnderLine(
@@ -1552,8 +1572,17 @@ function findSalutationIndex(text: string): { index: number } {
 
 function isSalutationLine(line: string): boolean {
   const key = normalizeKey(line);
-  return /\bdear\s+(s[il1]rs?|madams?|mesdames)\b/.test(key) ||
-    /\bdear\s+sir\s*madam/.test(key);
+  if (!key) {
+    return false;
+  }
+  if (/\bdear\s+(s[il1]rs?|madams?|mesdames)\b/.test(key) || /\bdear\s+sir\s*madam/.test(key)) {
+    return true;
+  }
+  if (!/^dear\b/.test(key)) {
+    return false;
+  }
+  const tokens = key.split(' ');
+  return tokens.length <= 12 && key.length <= 90;
 }
 
 function isAddressBlockStop(line: string): boolean {
@@ -1595,6 +1624,12 @@ function findSalutationHit(words: IOcrWord[]): { y0: number; y1: number } | unde
       y1 = Math.max(y1, word.y1);
     });
     return { y0, y1 };
+  }
+  const lines = groupWordsIntoLines(words);
+  for (let index = 0; index < lines.length; index++) {
+    if (isSalutationLine(lines[index].text)) {
+      return { y0: lines[index].y0, y1: lines[index].y1 };
+    }
   }
   return undefined;
 }

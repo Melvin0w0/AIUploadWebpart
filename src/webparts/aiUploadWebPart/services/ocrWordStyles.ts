@@ -10,8 +10,8 @@ import { IOcrWord } from './IPdfOcr';
  * maxLum is 0-255. Higher = paler grey still counts as ink (more sensitive).
  */
 export const UNDERLINE = {
-  /** Ink darkness thresholds to try, darkest first. Typical 110-180. */
-  maxLum: [90, 145],
+  /** Ink darkness 0-255. A pixel darker than this counts as underline ink. Black ink is usually 0-50, so 110 vs 190 often looks the same on real underlines. Typical 110-160. */
+  maxLum: [245, 248],
   /** A line must have this much underline vs line width, or it is ignored. 0.15 = sensitive, 0.35 = strict. */
   minLineCoverage: 0.22,
   /** Extra absolute px floor for the line underline length. */
@@ -32,6 +32,37 @@ export const UNDERLINE = {
   mergeGapWordFactor: 1.5,
   /** Isolated underlined words shorter than this are dropped as noise. */
   dropIsolatedShorterThan: 4
+};
+
+/**
+ * Subject line joining after Dear Sir/Madam.
+ * Tune maxLineGap only, then Convert again.
+ *
+ * Gap is in pixels: next line top minus previous line bottom.
+ * Wrapped heading (join with a space) -> 24-48
+ * One line only -> 0
+ */
+export const SUBJECT = {
+  maxLineGap: 20
+};
+
+/**
+ * Convert-to-OCR bold sensitivity. Tune extraOverMedian only, then Convert again.
+ * More <b> -> 0.04   Fewer <b> -> 0.12   Default 0.06
+ */
+export const BOLD = {
+  /** Pixel darker than this counts as ink inside a letter. Typical 130-160. */
+  inkLum: 145,
+  /**
+   * Ignore this fraction of the word bottom so an underline is not counted as extra ink.
+   * Use 0.20-0.35 only. This is NOT the bold sensitivity knob.
+   */
+  excludeBottom: 0.28,
+  /**
+   * How much heavier than typical page text a word must be to get <b>.
+   * Lower = more <b> (0.04). Higher = fewer (0.12). Start at 0.06.
+   */
+  extraOverMedian: 0.02
 };
 
 export function annotateOcrWordStyles(words: IOcrWord[], image: ImageData): IOcrWord[] {
@@ -62,17 +93,20 @@ function markUnderlinedWords(
       Math.min(UNDERLINE.mergeGapMax, Math.round(medianWordGap(line) * UNDERLINE.mergeGapWordFactor))
     );
     let merged: { left: number; right: number }[] = [];
+    let usedLum = thresholds[0];
     for (let index = 0; index < thresholds.length; index++) {
       const found = underlineSpansUnderLine(box, pixels, width, height, thresholds[index], mergeGap);
       if (found.length > 0) {
         merged = found;
+        usedLum = thresholds[index];
         break;
       }
     }
+    const wordThresholds = merged.length > 0 ? [usedLum] : thresholds;
 
     for (let wordIndex = 0; wordIndex < line.length; wordIndex++) {
       const word = line[wordIndex];
-      if (wordOverlapsSpans(word, merged) || wordHasUnderline(word, pixels, width, height, thresholds)) {
+      if (wordOverlapsSpans(word, merged) || wordHasUnderline(word, pixels, width, height, wordThresholds)) {
         word.underline = true;
       }
     }
@@ -162,67 +196,12 @@ function markBoldWords(
 
   const densities = scored.map((item) => item.density).sort((left, right) => left - right);
   const pageMedian = densities[Math.floor(densities.length / 2)] || 0;
-  const light = densities[Math.floor(densities.length * 0.15)] || 0;
-  const heavy = densities[Math.floor(densities.length * 0.85)] || densities[densities.length - 1] || 0;
-  if (heavy - light < 0.11) {
-    return;
-  }
-
-  const lines = groupWordRows(words);
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-    const line = lines[lineIndex];
-    const lineScored: { word: IOcrWord; density: number }[] = [];
-    for (let wordIndex = 0; wordIndex < line.length; wordIndex++) {
-      const word = line[wordIndex];
-      for (let scoredIndex = 0; scoredIndex < scored.length; scoredIndex++) {
-        if (scored[scoredIndex].word === word) {
-          lineScored.push(scored[scoredIndex]);
-          break;
-        }
-      }
-    }
-    if (lineScored.length === 0) {
-      continue;
-    }
-    const lineDensities = lineScored.map((item) => item.density).sort((left, right) => left - right);
-    const lineMedian = lineDensities[Math.floor(lineDensities.length / 2)] || 0;
-    const lineHeavy = lineDensities[lineDensities.length - 1] || 0;
-    const wholeLineBold = !lineIsMostlyUnderlined(line) &&
-      lineMedian >= pageMedian + 0.12 &&
-      lineMedian >= pageMedian * 1.28;
-    const cutoff = Math.max(pageMedian + 0.11, (lineMedian + lineHeavy) / 2, pageMedian * 1.28);
-    for (let itemIndex = 0; itemIndex < lineScored.length; itemIndex++) {
-      const item = lineScored[itemIndex];
-      if (wholeLineBold || item.density >= cutoff) {
-        item.word.bold = true;
-      }
-    }
-  }
-
-  let boldCount = 0;
+  const cutoff = pageMedian + BOLD.extraOverMedian;
   for (let index = 0; index < scored.length; index++) {
-    if (scored[index].word.bold) {
-      boldCount++;
+    if (scored[index].density >= cutoff) {
+      scored[index].word.bold = true;
     }
   }
-  if (boldCount === 0 || boldCount / scored.length > 0.8) {
-    for (let index = 0; index < scored.length; index++) {
-      scored[index].word.bold = false;
-    }
-  }
-}
-
-function lineIsMostlyUnderlined(line: IOcrWord[]): boolean {
-  if (line.length === 0) {
-    return false;
-  }
-  let marked = 0;
-  for (let index = 0; index < line.length; index++) {
-    if (line[index].underline) {
-      marked++;
-    }
-  }
-  return marked / line.length >= 0.5;
 }
 
 function isStyleCandidate(word: IOcrWord): boolean {
@@ -482,7 +461,7 @@ function wordInkDensity(
   const right = Math.min(width, Math.ceil(word.x1));
   const boxHeight = Math.max(1, word.y1 - word.y0);
   const bottomLimit = excludeUnderlineBand
-    ? word.y1 - boxHeight * 0.28
+    ? word.y1 - boxHeight * BOLD.excludeBottom
     : word.y1;
   const bottom = Math.min(height, Math.ceil(bottomLimit));
   if (right - left < 2 || bottom - top < 2) {
@@ -495,7 +474,7 @@ function wordInkDensity(
       const index = (row * width + col) * 4;
       const lum = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];
       total++;
-      if (lum < 145) {
+      if (lum < BOLD.inkLum) {
         dark++;
       }
     }

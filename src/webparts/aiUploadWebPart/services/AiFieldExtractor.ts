@@ -16,12 +16,12 @@ const SUBJECT_PROMPT: string = [
   'Strictly extract content from the letter body ONLY, which is the text that appears AFTER the salutation (Dear Sir / Dear Madam / Dear Sir or Madam / etc.) and BEFORE the closing (Yours faithfully / Yours sincerely / Yours truly).',
   '',
   'Primary instruction (must follow first):',
-  '- After the salutation, find the first line that contains any <u>...</u> underlined text.',
-  '- Copy that entire line, including words on the same line that are not inside <u> tags.',
-  '- If the next lines are also underlined (contain <u>), append those entire lines too, in order.',
-  '- Stop at the first following line that has no <u> tag.',
+  '- After the salutation, find lines that contain both <b> bold and <u> underlined text.',
+  '- Copy each matching line in full, including words on the same line that are not inside the tags.',
+  '- If the next matching line is a wrap of the same heading, join it with a single space. Do not join lines that are far apart.',
   '',
-  'If there is no underlined line after the salutation:',
+  'If no line has both bold and underline:',
+  '- Then copy the first underlined <u> line only.',
   '- Then copy the bold heading in the same body range. Prefer text wrapped in <b>...</b> tags.',
   '- Do not copy a random bold word inside a normal sentence.',
   '',
@@ -195,11 +195,11 @@ function buildUserPrompt(
     ? [
       'Extract these fields from the first page of a scanned document.',
       'Images: full first page, the addressee area for By Post / By Hand / Attn, the heading after Dear Sir, then the signature block if detected.',
-      'Organization is the Department line below By Post. Receiver is Attn if present, otherwise the person name below By Hand without Mr./Ms. or parenthetical text. Subject: after Dear Sir/Madam, copy the entire first underlined line and any immediately following underlined lines. Sender is the printed name immediately below the signature.'
+      'Organization is the Department line below By Post. Receiver is Attn if present, otherwise the person name below By Hand without Mr./Ms. or parenthetical text. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>. Sender is the printed name immediately below the signature.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Organization is the Department line below By Post. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name below By Hand. Subject: after Dear Sir/Madam, copy the entire first underlined line and any immediately following underlined lines.'
+      'Organization is the Department line below By Post. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name below By Hand. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>.'
     ];
 
   const parts = [
@@ -232,7 +232,7 @@ function buildUserPrompt(
   }
   parts.push('', SUBJECT_PROMPT);
   if (subjectText && subjectText.trim()) {
-    parts.push('', 'Detected Subject from the first underlined line after Dear, plus any following consecutive underlined lines. Use this whole block:', subjectText.trim());
+    parts.push('', 'Detected Subject from nearby lines after Dear that have both bold and underline. Use this text:', subjectText.trim());
   }
   if (refNo && refNo.trim()) {
     parts.push('', 'Detected Ref No from Our Ref: or standalone Ref:', refNo.trim());
@@ -288,7 +288,7 @@ async function buildPageImages(
         images.push({
           url: crop,
           detail: 'high',
-          label: 'Letter body AFTER the salutation and BEFORE the closing. Subject: copy the entire first underlined / <u> line and any immediately following underlined lines. If none, the bold heading. Fallback only if there is no underline or bold heading: Re: or Subject: line:'
+          label: 'Letter body AFTER the salutation and BEFORE the closing. Subject: copy the entire first line that has both <b> and <u>. If none, the first underlined line, then bold heading. Fallback: Re: or Subject: line:'
         });
       }
     }
