@@ -5,15 +5,17 @@ import { isProjectNumberField, sanitizeProjectNumber } from '../../constants/pro
 import { IAiExtractionHints, IDetectedFields, emptyDetectedFields, tryText, tryTextAsync } from '../correspondenceTypes';
 import { extractOurRefNo, extractYourRefNo } from '../fieldExtractor';
 import { IOcrPageResult } from '../IPdfOcr';
-import { analyzeDocumentSignature, asPersonName, extractReceiverAboveDearSir, subjectAppearsInPage } from '../signatureSender';
+import { analyzeDocumentSignature, extractSubjectBelowDearSir, subjectAppearsInPage } from '../signatureSender';
 import {
   classifyIncomingLetter,
   extractIncomingIssueDate,
-  extractIncomingMemoReceiver,
   extractIncomingMemoSender,
   extractIncomingOrganization,
-  extractIncomingSubject,
-  incomingProjectNumber
+  extractIncomingReceiver,
+  extractIncomingSender,
+  incomingProjectNumber,
+  incomingSenderName,
+  incomingSignatureParenName
 } from './extract';
 
 export async function detectIncomingFields(pages: IOcrPageResult[]): Promise<IDetectedFields> {
@@ -23,20 +25,20 @@ export async function detectIncomingFields(pages: IOcrPageResult[]): Promise<IDe
   const classification = classifyIncomingLetter(firstPage);
   detected.letterType = classification.letterType;
   detected.signature = await analyzeDocumentSignature(list);
-  detected.receiverName = tryText(() => extractReceiverAboveDearSir(firstPage) || extractIncomingMemoReceiver(firstPage));
+  detected.receiverName = tryText(() => extractIncomingReceiver(list));
   detected.organization = tryText(() => extractIncomingOrganization(firstPage));
-  detected.subjectText = await tryTextAsync(() => extractIncomingSubject(firstPage));
+  detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
   detected.refNo = tryText(() => extractOurRefNo(list));
   detected.yourRef = tryText(() => extractYourRefNo(list));
   detected.projectNumber = tryText(() => incomingProjectNumber(list));
   detected.issueDate = tryText(() => extractIncomingIssueDate(list));
   detected.memoSender = tryText(() => extractIncomingMemoSender(firstPage));
-  if (!detected.signature.senderName && detected.memoSender) {
-    detected.signature = {
-      ...detected.signature,
-      senderName: asPersonName(detected.memoSender) || detected.memoSender
-    };
-  }
+  const closingSender = tryText(() => extractIncomingSender(list));
+  const inkParenSender = incomingSignatureParenName(detected.signature.textBelow);
+  detected.signature = {
+    ...detected.signature,
+    senderName: closingSender || inkParenSender || incomingSenderName(detected.memoSender)
+  };
   return detected;
 }
 
@@ -47,10 +49,10 @@ export function pickIncomingFieldValue(
   keywordValue: string
 ): string {
   if (isSenderField(label)) {
-    return detected.signature.senderName || asPersonName(aiValue || '') || detected.memoSender;
+    return incomingSenderName(detected.signature.senderName);
   }
   if (isReceiverField(label)) {
-    return detected.receiverName || firstAiLine(aiValue);
+    return detected.receiverName;
   }
   if (isSubjectField(label)) {
     return detected.subjectText || groundedSubject(detected.firstPage, aiValue);
@@ -62,9 +64,7 @@ export function pickIncomingFieldValue(
     return detected.projectNumber || sanitizeProjectNumber(aiValue || '') || keywordValue || '';
   }
   if (isOrganizationField(label)) {
-    const aiOrganization = (aiValue || '').trim().split(/\r?\n/)[0].trim();
-    const incomingOrg = /\baecom\b/i.test(aiOrganization) ? '' : aiOrganization;
-    return detected.organization || incomingOrg || keywordValue || '';
+    return detected.organization;
   }
   if (isIssueDateField(label)) {
     return detected.issueDate || (aiValue && aiValue.trim()) || keywordValue || '';
@@ -84,14 +84,6 @@ export function incomingAiHints(detected: IDetectedFields): IAiExtractionHints {
     kind: 'incoming',
     letterType: detected.letterType
   };
-}
-
-function firstAiLine(aiValue: string): string {
-  const aiReceiver = (aiValue || '').trim();
-  if (!aiReceiver || /^dear\b/i.test(aiReceiver)) {
-    return '';
-  }
-  return aiReceiver.split(/\r?\n/)[0].trim();
 }
 
 function groundedSubject(page: IOcrPageResult | undefined, aiValue: string): string {

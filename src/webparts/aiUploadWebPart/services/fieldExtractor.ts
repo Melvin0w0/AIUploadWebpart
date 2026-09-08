@@ -349,8 +349,8 @@ function yourRefFromText(text: string): string {
 
 function chineseOurRefFromText(text: string): string {
   const labeled = firstChineseRef(text, [
-    /本[處处署局]檔號\s*[:：.\-]?\s*(.+)$/,
-    /本函編號\s*[:：.\-]?\s*(.+)$/
+    /本[處处署局]檔號\s*[:：.-]?\s*(.+)$/,
+    /本函編號\s*[:：.-]?\s*(.+)$/
   ]);
   if (labeled) {
     return labeled;
@@ -360,7 +360,7 @@ function chineseOurRefFromText(text: string): string {
     if (/貴[處处署局]檔號/.test(lines[index])) {
       continue;
     }
-    const match = lines[index].match(/檔號\s*[:：.\-]?\s*(.+)$/);
+    const match = lines[index].match(/檔號\s*[:：.-]?\s*(.+)$/);
     if (!match) {
       continue;
     }
@@ -378,8 +378,8 @@ function chineseOurRefFromText(text: string): string {
 
 function chineseYourRefFromText(text: string): string {
   return firstChineseRef(text, [
-    /貴[處处署局]檔號\s*[:：.\-]?\s*(.+)$/,
-    /來函編號\s*[:：.\-]?\s*(.+)$/
+    /貴[處处署局]檔號\s*[:：.-]?\s*(.+)$/,
+    /來函編號\s*[:：.-]?\s*(.+)$/
   ]);
 }
 

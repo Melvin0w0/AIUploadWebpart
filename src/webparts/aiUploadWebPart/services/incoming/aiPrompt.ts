@@ -1,40 +1,31 @@
 // Incoming AI prompt only. Outgoing lives in services/outgoing/aiPrompt.ts.
 import { IAiExtractionHints } from '../correspondenceTypes';
-
-export function incomingSubjectPrompt(): string {
-  return [
-    'Extract Subject from the letter body after the salutation (Dear Sir / Dear Madam / 敬啟者) and before the closing (Yours faithfully / 此致).',
-    'Prefer Re: / Subject: / 主旨 / 事由 / 關於 if present.',
-    'If those labels are missing, copy a heading after the salutation. Bold+underline is helpful but not required.',
-    'Do not include the salutation or the closing. Do not copy <u>, </u>, <b>, or </b> tags.'
-  ].join('\n');
-}
+import { OUTGOING_SUBJECT_PROMPT, outgoingBodyImageLabel } from '../outgoing/aiPrompt';
 
 export function incomingSystemPrompt(): string {
   return [
     'You extract metadata from incoming correspondence sent TO AECOM, written by another organisation.',
     'Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present.',
     'Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values.',
-    'Organization is the sender organisation on the letterhead at the top of the page, never AECOM in the addressee block.',
-    'Sender is the printed person name immediately below the handwritten signature of the originating party, not the job title. Skip for Director of / Chief Engineer.',
-    'Receiver is the AECOM person after Attn: / Attention: if present. Omit Mr., Ms., Mrs., Miss, and any parenthetical text.',
+    'Organization is the left-hand addressee line immediately above a floor line such as 12/F, or if there is no xx/F, immediately above a line containing xxx Road. The address is only on the left of the page; ignore Our Ref, Date, and other text on the right of the same row. Do not use the letterhead.',
+    'Sender is exactly the text inside the signature parentheses, for example (Ben xXx. LXX) -> Ben xXx. LXX. Take that inner text below Yours faithfully / Yours sincerely / Yours truly / 署名. Skip (signed) and (Attn: ...). Do not copy the job title under the parentheses.',
+    'Receiver is the text immediately below Yours faithfully / Yours sincerely / Yours truly, in that same column. Do not use CC / c.c. / 副本, whether it sits to the left of the signature or below the signature. Skip (signed), the sender parentheses, and the job title.',
     'Ref No is Our Ref / 本處檔號 / 檔號 of the originating party, not Your Ref.',
     'Project Number is the 8 digits immediately before the slash in Your Ref / 貴處檔號 / 來函編號; if there is no slash, the 8 digits immediately before the hyphen. Do not take Project Number from Our Ref.',
-    'Subject: after Dear / 敬啟者 and before the closing, copy Re: / Subject: / 主旨 / 事由, or a heading. Bold+underline if present, but it is not required.',
     'Do not invent values.'
-  ].join(' ');
+  ].join(' ') + '\nSubject:\n' + OUTGOING_SUBJECT_PROMPT;
 }
 
 export function incomingLetterheadImageLabel(): string {
-  return 'Letterhead at the top. Organization is the sender organisation printed here, not AECOM in the addressee block:';
+  return 'Letterhead at the top of the page. Organization is not taken from here; it is the line above xx/F or xxx Road in the addressee address:';
 }
 
 export function incomingBodyImageLabel(): string {
-  return 'Letter body AFTER the salutation and BEFORE the closing. Subject: Re:/Subject:/主旨/事由, or a heading. Bold+underline if present but not required:';
+  return outgoingBodyImageLabel();
 }
 
 export function incomingClosingImageLabel(): string {
-  return 'Closing block. Sender is the printed person name immediately below the handwritten signature:';
+  return 'Closing / signature block. Receiver is the line immediately below Yours faithfully / Yours sincerely, not CC to the left of or below the signature. Sender is the text INSIDE the signature parentheses:';
 }
 
 export function buildIncomingUserPrompt(
@@ -55,11 +46,11 @@ export function buildIncomingUserPrompt(
     ? [
       'Extract these fields from an incoming letter sent TO AECOM.',
       'Images: full first page, letterhead at the top, the body after the salutation, then the signature block if detected.',
-      'Organization is the sender on the letterhead, not AECOM. Receiver is the AECOM Attn. Subject may be Re:/主旨, not only bold+underline. Sender is the printed name below the signature.'
+      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road. Not the whole row and not the letterhead. Receiver is the text immediately below Yours faithfully / Yours sincerely, not CC left of or below the signature. Ignore Our Ref / Date on the right. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>. Sender is the text inside the signature parentheses.'
     ]
     : [
       'Extract these fields from the OCR text of an incoming letter sent TO AECOM.',
-      'Organization is the letterhead sender, not AECOM. Sender is the person name below the signature. Receiver is Attn (AECOM). Subject: Re:/Subject:/主旨/事由, or a heading after Dear/敬啟者.'
+      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road, above Dear / 敬啟者. Not the whole row and not the letterhead. Ignore right-column Our Ref / Date. Sender is the text inside the signature parentheses. Receiver is the text immediately below Yours faithfully / Yours sincerely, not CC. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>.'
     ];
 
   const parts = [
@@ -77,25 +68,25 @@ export function buildIncomingUserPrompt(
     parts.push('', 'Detected incoming letter type:', letterType);
   }
   if (signature && signature.senderName) {
-    parts.push('', 'Detected Sender from the printed name below the signature:', signature.senderName);
+    parts.push('', 'Detected Sender from the text inside the signature parentheses:', signature.senderName);
   } else if (signature && signature.textBelow) {
-    parts.push('', 'OCR immediately below the signature:', signature.textBelow);
+    parts.push('', 'OCR immediately below the signature. Sender is the text INSIDE parentheses, not (signed) and not the job title under them:', signature.textBelow);
   } else {
-    parts.push('', 'Look below the handwritten signature, or From: on a memo/email, for the printed person name. That is Sender.');
+    parts.push('', 'Copy the text inside the signature parentheses below Yours faithfully / Yours sincerely / Yours truly / 署名. Skip (signed). For a memo, use From:.');
   }
   if (receiverName && receiverName.trim()) {
-    parts.push('', 'Detected Receiver:', receiverName.trim());
+    parts.push('', 'Detected Receiver from the line immediately below Yours faithfully / Yours sincerely, not from CC:', receiverName.trim());
   } else {
-    parts.push('', 'Receiver is the AECOM person after Attn:. For a memo/email, use To:. Omit Mr./Ms. and parenthetical text.');
+    parts.push('', 'Receiver is the text immediately below Yours faithfully / Yours sincerely in that same column. Do not copy CC / c.c. / 副本 to the left of the signature or below the signature.');
   }
   if (organization && organization.trim()) {
-    parts.push('', 'Detected Organization:', organization.trim());
+    parts.push('', 'Detected Organization from the LEFT-HAND line above xx/F or xxx Road in the addressee address (not the whole row, not the letterhead):', organization.trim());
   } else {
-    parts.push('', 'Organization is the sender organisation on the letterhead above Our Ref. Do not use AECOM from the addressee block.');
+    parts.push('', 'Organization is the left-hand line immediately above xx/F, or if there is no xx/F, the line above xxx Road in the addressee address. Do not copy right-column text from that row, and do not use the letterhead.');
   }
-  parts.push('', incomingSubjectPrompt());
+  parts.push('', OUTGOING_SUBJECT_PROMPT);
   if (subjectText && subjectText.trim()) {
-    parts.push('', 'Detected Subject. Use this text unless the page clearly shows a better heading:', subjectText.trim());
+    parts.push('', 'Detected Subject from nearby lines after Dear that have both bold and underline. Use this text:', subjectText.trim());
   }
   if (refNo && refNo.trim()) {
     parts.push('', 'Detected Ref No from Our Ref: or standalone Ref:', refNo.trim());
@@ -117,10 +108,10 @@ function incomingFieldHelp(): string {
     'Leading BL: leave empty unless an AECOM business-line name is clearly shown. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water.',
     'Project Number: 8 digits immediately before the slash in Your Ref: / Your Ref : / 貴處檔號 / 來函編號. Example Your Ref: 12345678/ABC -> 12345678. If there is no slash, take the 8 digits immediately before the hyphen. Digits only. Do not use Our Ref.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
-    'Organization: the sender organisation printed in the letterhead ABOVE Our Ref. Government department, company, or consultant name. Never copy AECOM from the addressee block.',
-    'Sender: printed person name immediately below the handwritten signature. Do not copy Chief Engineer, Director, Manager, or for Director of. Skip (signed). For a memo or email, use From:.',
-    'Receiver: AECOM recipient. If Attn: / Attention: is present, copy only the person name after that label. For a memo or email, use To:. Omit Mr., Ms., Mrs., Miss, Dr., or Ir. Delete parentheses and the text inside them.',
-    'Subject:\n' + incomingSubjectPrompt(),
+    'Organization: in the LEFT addressee address above Dear / 敬啟者, find a floor line such as 12/F or G/F and copy only the left-hand line immediately above it. If there is no xx/F, find a line containing xxx Road and copy the left-hand line immediately above that. Do not include Our Ref, Your Ref, Date, or other text on the right of that row. Do not use letterhead.',
+    'Sender: copy ONLY the text inside the signature parentheses, e.g. (Ben xXx. LXX) -> Ben xXx. LXX. Prefer parentheses below Yours faithfully / Yours sincerely / Yours truly / 署名. Do not copy parentheses from Attn: near the top. Skip (signed). Do not copy the job title under the parentheses. For a memo or email with no signature parentheses, use From:.',
+    'Receiver: copy the text immediately below Yours faithfully / Yours sincerely / Yours truly, in the same column as that closing. That is Receiver. Do not copy CC / c.c. / 副本 / copy to, whether it is to the left of the handwritten signature or below the signature. Skip (signed), sender parentheses, and job titles under the signature. Only if that closing line is missing, use Attn: or the first left-hand address line above Dear.',
+    'Subject:\n' + OUTGOING_SUBJECT_PROMPT,
     'File No: file number if shown separately from Ref No.',
     'Ref No: copy the value to the right of Our Ref: / 本處檔號 / 檔號. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
     'Issue Date: the document date in dd/MM/yyyy, for example 03/09/2026. Accept 8 September 2026 and 2026年9月8日.',

@@ -1045,6 +1045,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       return this._stripHonorifics(this._stripParentheses(value));
     }
     if (isSenderField(label)) {
+      const file = this.state.file;
+      if (file && correspondenceKindFromFileName(file.name) === 'incoming') {
+        return this._unwrapSenderIfFullyParenthesized(value);
+      }
       return this._stripParentheses(value);
     }
     if (isIssueDateField(label)) {
@@ -1062,6 +1066,15 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       .replace(/\s*(?:先生|女士|小姐|太太)\s*$/g, '')
       .replace(/\s+/g, ' ')
       .trim();
+  };
+
+  private _unwrapSenderIfFullyParenthesized = (value: string): string => {
+    const text = (value || '').trim();
+    const wrapped = text.match(/^[(\uFF08]\s*([\s\S]+?)\s*[)\uFF09]$/);
+    if (wrapped) {
+      return (wrapped[1] || '').replace(/\s+/g, ' ').trim();
+    }
+    return text;
   };
 
   private _stripParentheses = (value: string): string => {

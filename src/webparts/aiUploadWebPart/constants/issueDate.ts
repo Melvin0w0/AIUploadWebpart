@@ -22,7 +22,7 @@ export function formatIssueDate(date: Date): string {
 
 export function parseIssueDate(value: string): Date | undefined {
   const trimmed = (value || '').replace(/\s+/g, ' ').trim()
-    .replace(/^(?:date|日期)\s*[:：.\-]?\s*/i, '');
+    .replace(/^(?:date|日期)\s*[:：.-]?\s*/i, '');
   if (!trimmed) {
     return undefined;
   }
@@ -97,6 +97,21 @@ export function sanitizeIssueDate(value: string): string {
   return date ? formatIssueDate(date) : (value || '').trim();
 }
 
+const CHINESE_DIGITS: { [key: string]: number } = {
+  '零': 0,
+  '〇': 0,
+  '一': 1,
+  '二': 2,
+  '三': 3,
+  '四': 4,
+  '五': 5,
+  '六': 6,
+  '七': 7,
+  '八': 8,
+  '九': 9,
+  '十': 10
+};
+
 function chineseYear(value: string): number {
   let digits = '';
   for (let index = 0; index < value.length; index++) {
@@ -127,21 +142,6 @@ function chineseNumber(value: string): number {
   }
   return CHINESE_DIGITS[value] || 0;
 }
-
-const CHINESE_DIGITS: { [key: string]: number } = {
-  '零': 0,
-  '〇': 0,
-  '一': 1,
-  '二': 2,
-  '三': 3,
-  '四': 4,
-  '五': 5,
-  '六': 6,
-  '七': 7,
-  '八': 8,
-  '九': 9,
-  '十': 10
-};
 
 function monthNumber(name: string): number {
   const key = (name || '').replace(/\./g, '').toLowerCase();
