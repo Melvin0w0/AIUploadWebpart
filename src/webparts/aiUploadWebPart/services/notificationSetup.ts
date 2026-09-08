@@ -98,16 +98,19 @@ async function resolveList(
   siteUrl: string
 ): Promise<{ siteUrl: string; listTitle: string; columns: IListColumns } | undefined> {
   const webUrl = trimSlash(siteUrl);
-  if (cached && cached.siteUrl === webUrl) {
-    return cached;
+  const existing = cached;
+  if (existing && existing.siteUrl === webUrl) {
+    return existing;
   }
 
   for (let i = 0; i < LIST_TITLES.length; i++) {
     const listTitle = LIST_TITLES[i];
     try {
       const columns = await readColumns(http, webUrl, listTitle);
-      cached = { siteUrl: webUrl, listTitle, columns };
-      return cached;
+      const next = { siteUrl: webUrl, listTitle, columns };
+      // eslint-disable-next-line require-atomic-updates -- cache write after list lookup
+      cached = next;
+      return next;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (isMissingListError(message)) {

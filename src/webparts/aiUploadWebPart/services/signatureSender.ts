@@ -76,6 +76,14 @@ export function extractReceiverAboveDearSir(page?: IOcrPageResult): string {
         return cleaned;
       }
     }
+    const fromFloor = receiverAboveFloorLine(page);
+    if (fromFloor) {
+      return fromFloor;
+    }
+    const fromFloorText = receiverAboveFloorLineFromText(page.text || '');
+    if (fromFloorText) {
+      return fromFloorText;
+    }
     const fromByHand = receiverBelowByHand(page);
     if (fromByHand) {
       return fromByHand;
@@ -95,7 +103,15 @@ export function extractOrganizationAboveAddressee(page?: IOcrPageResult): string
     if (fromWords) {
       return fromWords;
     }
-    return departmentsBelowOurRefAboveDearFromText(page.text || '');
+    const fromText = departmentsBelowOurRefAboveDearFromText(page.text || '');
+    if (fromText) {
+      return fromText;
+    }
+    const fromFloor = organizationAboveFloorLine(page);
+    if (fromFloor) {
+      return fromFloor;
+    }
+    return organizationAboveFloorLineFromText(page.text || '');
   } catch {
     return '';
   }
@@ -177,6 +193,163 @@ function departmentsBelowOurRefAboveDearFromText(text: string): string {
   return hits.join(' ').replace(/\s+/g, ' ').trim();
 }
 
+function isFloorLine(line: string): boolean {
+  return /\b\d{1,3}\s*[/\\\uFF0F]\s*f\b/i.test((line || '').replace(/\s+/g, ' ').trim());
+}
+
+function stripOrganizationSymbols(value: string): string {
+  return (value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function organizationAboveFloorLine(page: IOcrPageResult): string {
+  const lines = groupWordsIntoLines(page.words || []);
+  if (lines.length === 0) {
+    return '';
+  }
+  const dear = findSalutationHit(page.words || []);
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (dear && line.y1 > dear.y0 + 2) {
+      continue;
+    }
+    if (!isFloorLine(line.text)) {
+      continue;
+    }
+    for (let previous = index - 1; previous >= 0; previous--) {
+      const candidate = lines[previous];
+      if (dear && candidate.y1 > dear.y0 + 2) {
+        continue;
+      }
+      if (isOurRefLine(candidate.text) || isSalutationLine(candidate.text) || isDeliveryLine(candidate.text) || isFloorLine(candidate.text)) {
+        continue;
+      }
+      const text = stripOrganizationSymbols(joinOcrWords(candidate.words));
+      if (text) {
+        return text;
+      }
+    }
+  }
+  return '';
+}
+
+function organizationAboveFloorLineFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter((line) => line.length > 0);
+  let dearIndex = lines.length;
+  for (let index = 0; index < lines.length; index++) {
+    if (isSalutationLine(lines[index])) {
+      dearIndex = index;
+      break;
+    }
+  }
+  for (let index = 0; index < dearIndex; index++) {
+    if (!isFloorLine(lines[index])) {
+      continue;
+    }
+    for (let previous = index - 1; previous >= 0; previous--) {
+      const candidate = lines[previous];
+      if (isOurRefLine(candidate) || isDeliveryLine(candidate) || isFloorLine(candidate)) {
+        continue;
+      }
+      const cleaned = stripOrganizationSymbols(candidate);
+      if (cleaned) {
+        return cleaned;
+      }
+    }
+  }
+  return '';
+}
+
+function isReceiverSkipLine(line: string): boolean {
+  return isDepartmentLine(line) ||
+    isDirectorLine(line) ||
+    isDeliveryLine(line) ||
+    isFloorLine(line) ||
+    isOurRefLine(line) ||
+    isSalutationLine(line) ||
+    isAttnLine(line) ||
+    isAddressBlockStop(line);
+}
+
+function startsWithHonorific(line: string): boolean {
+  const key = normalizeKey(line);
+  return /^(mr|mrs|ms|miss|mdm|dr|ir|prof|professor|engr?|messrs|sir|madam|mx)\b/.test(key) ||
+    /^(?:先生|女士|小姐|太太)/.test((line || '').trim());
+}
+
+function pickReceiverLine(raw: string): string {
+  const cleaned = cleanReceiverName(raw);
+  if (!cleaned) {
+    return '';
+  }
+  if (startsWithHonorific(raw) || looksLikePersonName(cleaned) || looksLikePersonName(raw)) {
+    return cleaned;
+  }
+  return '';
+}
+
+function receiverAboveFloorLine(page: IOcrPageResult): string {
+  const lines = groupWordsIntoLines(page.words || []);
+  if (lines.length === 0) {
+    return '';
+  }
+  const dear = findSalutationHit(page.words || []);
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (dear && line.y1 > dear.y0 + 2) {
+      continue;
+    }
+    if (!isFloorLine(line.text)) {
+      continue;
+    }
+    for (let previous = index - 1; previous >= 0; previous--) {
+      const candidate = lines[previous];
+      if (dear && candidate.y1 > dear.y0 + 2) {
+        continue;
+      }
+      const raw = joinOcrWords(candidate.words).replace(/\s+/g, ' ').trim();
+      if (!raw || isReceiverSkipLine(raw)) {
+        continue;
+      }
+      const picked = pickReceiverLine(raw);
+      if (picked) {
+        return picked;
+      }
+    }
+  }
+  return '';
+}
+
+function receiverAboveFloorLineFromText(text: string): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter((line) => line.length > 0);
+  let dearIndex = lines.length;
+  for (let index = 0; index < lines.length; index++) {
+    if (isSalutationLine(lines[index])) {
+      dearIndex = index;
+      break;
+    }
+  }
+  for (let index = 0; index < dearIndex; index++) {
+    if (!isFloorLine(lines[index])) {
+      continue;
+    }
+    for (let previous = index - 1; previous >= 0; previous--) {
+      const raw = lines[previous];
+      if (!raw || isReceiverSkipLine(raw)) {
+        continue;
+      }
+      const picked = pickReceiverLine(raw);
+      if (picked) {
+        return picked;
+      }
+    }
+  }
+  return '';
+}
+
 function receiverBelowByHand(page: IOcrPageResult): string {
   const lines = linesBelowDelivery(page, 'hand');
   for (let index = 0; index < lines.length; index++) {
@@ -198,6 +371,7 @@ function cleanReceiverName(value: string): string {
   let text = stripParenthetical(value);
   text = text
     .replace(/^(?:(?:mr|mrs|ms|miss|dr|ir|prof(?:essor)?|engr?|sir|madam|mdm|mx|messrs)\b\.?\s*)+/i, '')
+    .replace(/^(?:先生|女士|小姐|太太)\s*/g, '')
     .replace(/\s*(?:先生|女士|小姐|太太)\s*$/g, '')
     .replace(/\s+/g, ' ')
     .trim();

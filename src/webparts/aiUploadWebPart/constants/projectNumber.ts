@@ -18,11 +18,16 @@ export function projectNumberFromRef(refValue: string): string {
   if (!source) {
     return '';
   }
-  const slash = source.search(/[/\\\uFF0F]/);
-  if (slash < 0) {
+  return eightDigitsBeforeSeparator(source, /[/\\\uFF0F]/)
+    || eightDigitsBeforeSeparator(source, /[-–—\uFF0D]/);
+}
+
+function eightDigitsBeforeSeparator(source: string, separator: RegExp): string {
+  const index = source.search(separator);
+  if (index < 0) {
     return '';
   }
-  const before = source.substring(0, slash);
+  const before = source.substring(0, index);
   const atEnd = before.match(/(\d{8})\s*$/);
   if (atEnd) {
     return atEnd[1];
