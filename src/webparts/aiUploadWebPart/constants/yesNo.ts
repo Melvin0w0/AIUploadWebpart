@@ -32,7 +32,8 @@ export function canonicalYesNo(value: string): string {
     return NO_VALUE;
   }
   if (/^(yes|y|true|1|有|是)$/.test(key) ||
-    /\b(?:yes|attached|attachment|encl(?:osure)?s?|appendix|scan(?:ned)?)\b/.test(key)) {
+    /\b(?:yes|attached|attachment|encl(?:osure)?s?|appendix|scan(?:ned)?)\b/.test(key) ||
+    /附件|隨函|随函/.test(trimmed)) {
     return YES_VALUE;
   }
   return YES_VALUE;

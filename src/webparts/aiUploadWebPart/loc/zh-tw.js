@@ -100,6 +100,7 @@ define([], function () {
     IncomingLabel: 'Incoming',
     OutgoingLabel: 'Outgoing',
     IncomingNoAutoFillHint: 'Incoming files are not auto-filled. Enter fields manually or highlight the PDF.',
+    IncomingProjectNumberDescription: '從 Your Ref 取 / 前面的 8 位數字。',
     NotificationSetupThresholdHint: '無法從「Notification Set-up」讀取 Leading BL。請為 Project No 欄位建立索引（此清單超過 5,000 筆）。'
     // loc bundle
   };

@@ -99,6 +99,7 @@ declare interface IAiUploadWebPartStrings {
   IncomingLabel: string;
   OutgoingLabel: string;
   IncomingNoAutoFillHint: string;
+  IncomingProjectNumberDescription: string;
   NotificationSetupThresholdHint: string;
 }
 

@@ -60,6 +60,25 @@ export async function analyzeSignature(page?: IOcrPageResult): Promise<ISignatur
   }
 }
 
+export async function analyzeDocumentSignature(pages?: IOcrPageResult[]): Promise<ISignatureAnalysis> {
+  const list = pages || [];
+  const firstPage = list[0];
+  const closingPage = list.length > 0 ? list[list.length - 1] : undefined;
+  const empty: ISignatureAnalysis = {
+    region: undefined,
+    senderName: '',
+    textBelow: ''
+  };
+  let signature = await analyzeSignature(closingPage).catch(() => empty);
+  if (firstPage && closingPage && firstPage.pageNumber !== closingPage.pageNumber) {
+    signature = {
+      ...signature,
+      region: undefined
+    };
+  }
+  return signature;
+}
+
 export function asPersonName(value: string): string {
   return personNameFromLine(value);
 }
@@ -1652,7 +1671,7 @@ function looksLikeSubjectHeading(line: string): boolean {
 
 function stripSubjectLabel(line: string): string {
   return (line || '')
-    .replace(/^(re|subject|ref)\s*[:.-]\s*/i, '')
+    .replace(/^(re|subject|ref|主旨|事由|關於|关于)\s*[:.-\uFF1A]\s*/i, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -1734,11 +1753,11 @@ function matchReLabel(line: string): { value: string } | undefined {
   if (!trimmed || /\b(?:our|your?|yr)\s+(?:re|ref)\b/i.test(trimmed)) {
     return undefined;
   }
-  const match = trimmed.match(/^(?:re|subject)\s*[:;\uFF1A]\s*(.*)$/i);
+  const match = trimmed.match(/^(?:re|subject|主旨|事由|關於|关于)\s*[:;\uFF1A]\s*(.*)$/i);
   if (match) {
     return { value: stripSubjectLabel(match[1] || '') };
   }
-  if (/^(?:re|subject)$/i.test(trimmed)) {
+  if (/^(?:re|subject|主旨|事由|關於|关于)$/i.test(trimmed)) {
     return { value: '' };
   }
   return undefined;
@@ -1811,6 +1830,9 @@ function findSalutationIndex(text: string): { index: number } {
 }
 
 function isSalutationLine(line: string): boolean {
+  if (/敬啟者|敬启者|鈞鑒|台鑒/.test(line || '')) {
+    return true;
+  }
   const key = normalizeKey(line);
   if (!key) {
     return false;
@@ -2195,6 +2217,9 @@ function isIgnorableBelowClosing(line: string): boolean {
 }
 
 function isClosingLine(line: string): boolean {
+  if (/此致|順頌|顺颂|專此|专此|敬祝/.test(line || '')) {
+    return true;
+  }
   const key = normalizeKey(line);
   return /(^|\s)yours\s+sincere/.test(' ' + key) ||
     /(^|\s)yours\s+faithful/.test(' ' + key) ||
@@ -2234,7 +2259,7 @@ function findClosingHit(words: IOcrWord[]): { x0: number; y0: number; y1: number
     const lineMid = (sorted[index].y0 + sorted[index].y1) / 2;
     const sameLine = window.filter((word) => Math.abs((word.y0 + word.y1) / 2 - lineMid) < 12);
     const phrase = sameLine.map((word) => word.text || '').join(' ');
-    if (!isClosingLine(phrase)) {
+    if (!isClosingLine(phrase) && !isClosingLine(sorted[index].text || '')) {
       continue;
     }
     let x0 = sameLine[0].x0;
@@ -2246,6 +2271,12 @@ function findClosingHit(words: IOcrWord[]): { x0: number; y0: number; y1: number
       y1 = Math.max(y1, word.y1);
     });
     return { x0, y0, y1 };
+  }
+  const lines = groupWordsIntoLines(words);
+  for (let index = 0; index < lines.length; index++) {
+    if (isClosingLine(lines[index].text)) {
+      return { x0: lines[index].x0, y0: lines[index].y0, y1: lines[index].y1 };
+    }
   }
   return undefined;
 }

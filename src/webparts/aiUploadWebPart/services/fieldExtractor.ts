@@ -59,7 +59,8 @@ export function extractFieldValues(pages: IOcrPageResult[], fieldLabels: string[
 }
 
 export function extractOurRefOnly(pages: IOcrPageResult[]): string {
-  return extractLabeledRef(pages, ourRefWordIndex, ourRefFromText);
+  return extractLabeledRef(pages, ourRefWordIndex, ourRefFromText)
+    || extractFromPageText(pages, chineseOurRefFromText);
 }
 
 export function extractOurRefNo(pages: IOcrPageResult[]): string {
@@ -68,7 +69,22 @@ export function extractOurRefNo(pages: IOcrPageResult[]): string {
 }
 
 export function extractYourRefNo(pages: IOcrPageResult[]): string {
-  return extractLabeledRef(pages, yourRefWordIndex, yourRefFromText);
+  return extractLabeledRef(pages, yourRefWordIndex, yourRefFromText)
+    || extractFromPageText(pages, chineseYourRefFromText);
+}
+
+function extractFromPageText(
+  pages: IOcrPageResult[],
+  fromText: (text: string) => string
+): string {
+  const list = pages || [];
+  for (let index = 0; index < list.length; index++) {
+    const value = fromText(list[index] ? list[index].text || '' : '');
+    if (value) {
+      return value;
+    }
+  }
+  return '';
 }
 
 function extractLabeledRef(
@@ -326,6 +342,63 @@ function yourRefFromText(text: string): string {
       .trim();
     if (value) {
       return value;
+    }
+  }
+  return '';
+}
+
+function chineseOurRefFromText(text: string): string {
+  const labeled = firstChineseRef(text, [
+    /本[處处署局]檔號\s*[:：.\-]?\s*(.+)$/,
+    /本函編號\s*[:：.\-]?\s*(.+)$/
+  ]);
+  if (labeled) {
+    return labeled;
+  }
+  const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  for (let index = 0; index < lines.length; index++) {
+    if (/貴[處处署局]檔號/.test(lines[index])) {
+      continue;
+    }
+    const match = lines[index].match(/檔號\s*[:：.\-]?\s*(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const value = (match[1] || '')
+      .replace(/\b(date|tel|fax|email)\b.*$/i, '')
+      .replace(/日期.*$/, '')
+      .replace(/^[:.：\s-]+/, '')
+      .trim();
+    if (value) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function chineseYourRefFromText(text: string): string {
+  return firstChineseRef(text, [
+    /貴[處处署局]檔號\s*[:：.\-]?\s*(.+)$/,
+    /來函編號\s*[:：.\-]?\s*(.+)$/
+  ]);
+}
+
+function firstChineseRef(text: string, patterns: RegExp[]): string {
+  const lines = (text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  for (let patternIndex = 0; patternIndex < patterns.length; patternIndex++) {
+    for (let index = 0; index < lines.length; index++) {
+      const match = lines[index].match(patterns[patternIndex]);
+      if (!match) {
+        continue;
+      }
+      const value = (match[1] || '')
+        .replace(/\b(date|tel|fax|email)\b.*$/i, '')
+        .replace(/日期.*$/, '')
+        .replace(/^[:.：\s-]+/, '')
+        .trim();
+      if (value) {
+        return value;
+      }
     }
   }
   return '';

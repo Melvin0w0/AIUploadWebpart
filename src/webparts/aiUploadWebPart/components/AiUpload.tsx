@@ -21,8 +21,8 @@ import { PdfOcrService } from '../services/PdfOcrService';
 import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
 import { formatOcrTextWithStyles } from '../services/ocrSelection';
 import PdfHighlightViewer from './PdfHighlightViewer';
-import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
-import { correspondenceKindFromFileName, nameFromPdfFile } from '../constants/incomingName';
+import { DEFAULT_FORM_FIELDS, isNameField, isReceiverField, isRegistrationNumberField, isRequiredField, isSenderField, missingRequiredFields } from '../constants/defaultFormFields';
+import { CorrespondenceKind, correspondenceKindFromFileName, nameFromPdfFile } from '../constants/incomingName';
 import {
   canonicalLeadingBl,
   isLeadingBlField,
@@ -31,7 +31,6 @@ import {
 import {
   isProjectNumberField,
   isValidProjectNumber,
-  projectNumberFromRef,
   sanitizeProjectNumber
 } from '../constants/projectNumber';
 import {
@@ -54,9 +53,10 @@ import {
   YES_NO_OPTIONS,
   YES_VALUE
 } from '../constants/yesNo';
-import { extractFieldValues, extractOurRefNo, extractOurRefOnly } from '../services/fieldExtractor';
+import { extractFieldValues } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
-import { analyzeSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir, subjectAppearsInPage } from '../services/signatureSender';
+import { detectIncomingFields, incomingAiHints, pickIncomingFieldValue } from '../services/incoming/fields';
+import { detectOutgoingFields, outgoingAiHints, pickOutgoingFieldValue } from '../services/outgoing/fields';
 import { SharePointUploadService } from '../services/SharePointUploadService';
 import {
   buildUploadFolderUrl,
@@ -470,7 +470,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                               : isRegistrationNumberField(field.label)
                                 ? strings.RegistrationNumberDescription
                                 : isProjectNumberField(field.label)
-                                  ? strings.ProjectNumberDescription
+                                  ? (documentKind === 'incoming'
+                                    ? (strings.IncomingProjectNumberDescription || 'From Your Ref, 8 digits before /.')
+                                    : strings.ProjectNumberDescription)
                                   : undefined
                           }
                           maxLength={isProjectNumberField(field.label) ? 8 : undefined}
@@ -958,7 +960,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
   private _refreshLeadingBlFromNotificationSetup = (projectNumber: string): void => {
     const file = this.state.file;
-    if (!file || correspondenceKindFromFileName(file.name) === 'incoming') {
+    if (!file) {
       return;
     }
     const projectNo = sanitizeProjectNumber(projectNumber);
@@ -1352,25 +1354,18 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
       let filled: { fields: IFormField[]; info: string | undefined; warning?: string };
       const documentKind = correspondenceKindFromFileName(file.name);
-      if (documentKind === 'incoming') {
-        filled = {
-          fields: this._applyPdfFileName(this.state.fields, file.name),
-          info: strings.IncomingNoAutoFillHint || 'Incoming files are not auto-filled. Enter fields manually or highlight the PDF.'
-        };
-      } else {
-        this.setState({
-          progress: {
-            page: result.pages.length,
-            totalPages: result.pages.length,
-            percent: 100,
-            status: strings.ExtractingFields
-          }
-        });
-        try {
-          filled = await this._fillFields(result.pages);
-        } catch {
-          filled = { fields: this.state.fields, info: undefined };
+      this.setState({
+        progress: {
+          page: result.pages.length,
+          totalPages: result.pages.length,
+          percent: 100,
+          status: strings.ExtractingFields
         }
+      });
+      try {
+        filled = await this._fillFields(result.pages, documentKind);
+      } catch {
+        filled = { fields: this.state.fields, info: undefined };
       }
       this.setState({
         pages: result.pages,
@@ -1392,61 +1387,22 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     }
   };
 
-  private _fillFields = async (pages: IOcrPageResult[]): Promise<{
+  private _fillFields = async (pages: IOcrPageResult[], kind: CorrespondenceKind): Promise<{
     fields: IFormField[];
     error: string | undefined;
     info: string | undefined;
     warning?: string;
   }> => {
     const labels = this.state.fields.map((field) => field.label);
-    const firstPage = pages && pages.length > 0 ? pages[0] : undefined;
-    const closingPage = pages && pages.length > 0 ? pages[pages.length - 1] : undefined;
+    const incoming = kind === 'incoming';
+    const detected = incoming
+      ? await detectIncomingFields(pages || [])
+      : await detectOutgoingFields(pages || []);
     let keywordValues: { [label: string]: string } = {};
     try {
       keywordValues = extractFieldValues(pages || [], labels);
     } catch {
       keywordValues = {};
-    }
-    let signature = await analyzeSignature(closingPage).catch(() => ({
-      region: undefined,
-      senderName: '',
-      textBelow: ''
-    }));
-    if (firstPage && closingPage && firstPage.pageNumber !== closingPage.pageNumber) {
-      signature = {
-        ...signature,
-        region: undefined
-      };
-    }
-    let receiverName = '';
-    let subjectText = '';
-    let refNo = '';
-    let projectNumber = '';
-    let organization = '';
-    try {
-      receiverName = extractReceiverAboveDearSir(firstPage);
-    } catch {
-      receiverName = '';
-    }
-    try {
-      organization = extractOrganizationAboveAddressee(firstPage);
-    } catch {
-      organization = '';
-    }
-    try {
-      subjectText = await extractSubjectBelowDearSir(firstPage);
-    } catch {
-      subjectText = '';
-    }
-    try {
-      refNo = extractOurRefNo(pages || []);
-    } catch {
-      refNo = '';
-    }
-    try {
-      projectNumber = projectNumberFromRef(extractOurRefOnly(pages || []));
-    } catch {
-      projectNumber = '';
     }
     let aiValues: { [label: string]: string } = {};
     let info: string | undefined;
@@ -1460,7 +1416,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (isAiExtractionConfigured(aiConfig)) {
       try {
         const ocrText = (pages || []).map((page) => formatOcrTextWithStyles(page.words || []) || page.text || '').join('\n');
-        aiValues = await extractFieldsWithAi(ocrText, labels, aiConfig, firstPage, signature, receiverName, subjectText, refNo, organization);
+        aiValues = await extractFieldsWithAi(
+          ocrText,
+          labels,
+          aiConfig,
+          incoming ? incomingAiHints(detected) : outgoingAiHints(detected)
+        );
       } catch {
         aiValues = {};
       }
@@ -1474,37 +1435,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         if (isNameField(field.label)) {
           return field;
         }
-        const aiValue = aiValues[field.label];
-        const keywordValue = keywordValues[field.label];
-        let value = '';
-        if (isSenderField(field.label)) {
-          value = signature.senderName || asPersonName(aiValue || '');
-        } else if (isReceiverField(field.label)) {
-          const aiReceiver = (aiValue || '').trim();
-          const fromAi = aiReceiver && !/^dear\b/i.test(aiReceiver)
-            ? aiReceiver.split(/\r?\n/)[0].trim()
-            : '';
-          value = receiverName || fromAi;
-        } else if (isSubjectField(field.label)) {
-          const aiSubject = (aiValue || '').trim();
-          const groundedAi = firstPage && aiSubject && subjectAppearsInPage(firstPage, aiSubject)
-            ? aiSubject
-            : '';
-          value = subjectText || groundedAi;
-        } else if (isRefNoField(field.label)) {
-          value = refNo || (aiValue || '').trim();
-        } else if (isProjectNumberField(field.label)) {
-          value = projectNumber || sanitizeProjectNumber(aiValue || '') || keywordValue || '';
-        } else if (isOrganizationField(field.label)) {
-          const aiOrganization = (aiValue || '').trim().split(/\r?\n/)[0].trim();
-          value = organization || aiOrganization || keywordValue || '';
-        } else {
-          value = (aiValue && aiValue.trim()) || keywordValue || '';
-        }
-        value = this._normalizeFieldValue(field.label, value);
+        const raw = incoming
+          ? pickIncomingFieldValue(field.label, detected, aiValues[field.label] || '', keywordValues[field.label] || '')
+          : pickOutgoingFieldValue(field.label, detected, aiValues[field.label] || '', keywordValues[field.label] || '');
         return {
           ...field,
-          value
+          value: this._normalizeFieldValue(field.label, raw)
         };
       }), this.state.file ? this.state.file.name : undefined);
     } catch {
