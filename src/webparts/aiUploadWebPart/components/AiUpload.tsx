@@ -73,6 +73,7 @@ import {
   IFieldHistory
 } from '../services/fieldHistory';
 import { lookupLeadingBlFromNotificationSetup } from '../services/notificationSetup';
+import { isSpfxServeDebug } from '../services/spfxLocalDebug';
 
 interface IFormField {
   id: string;
@@ -223,9 +224,15 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       ? strings.UploadDestinationPending
       : destinationUrl;
     const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
+    const isLocalDebug = isSpfxServeDebug();
 
     return (
-      <section className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''}`}>
+      <section className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''} ${isLocalDebug ? styles.debugMode : ''}`}>
+        {isLocalDebug && (
+          <div className={styles.debugBanner} role="status">
+            {strings.ServeDebugBanner || 'DEBUG'}
+          </div>
+        )}
         <div className={styles.header}>
           <h1 className={styles.title}>{strings.WebPartTitle}</h1>
           <p className={styles.subtitle}>{strings.WebPartSubtitle}</p>
