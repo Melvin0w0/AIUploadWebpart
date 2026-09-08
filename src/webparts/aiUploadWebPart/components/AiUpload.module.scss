@@ -848,10 +848,15 @@
 }
 
 .ocrTextPane {
+  display: none;
   background: var(--apple-card);
   border-radius: var(--apple-radius);
   box-shadow: var(--apple-shadow);
   overflow: visible;
+}
+
+.debugMode .ocrTextPane {
+  display: block;
 }
 
 .ocrTextBody {
