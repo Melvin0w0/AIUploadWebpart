@@ -4,6 +4,7 @@ import Tesseract from 'tesseract.js';
 import pdfWorkerAsset from '../assets/pdf.worker.min.jpg';
 import { IOcrPageResult, IOcrProgress, IOcrResult } from './IPdfOcr';
 import { annotateOcrWordStyles } from './ocrWordStyles';
+import { createOcrCanvasWithoutWatermark, getOcrOptionalContentConfig } from './watermarkRemoval';
 
 const MAX_RENDER_WIDTH = 1600;
 const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm';
@@ -80,6 +81,10 @@ export class PdfOcrService {
         });
 
         const canvas = await PdfOcrService._renderPage(pdf, pageNum);
+        const ocrSource = ocrOcConfig
+          ? await PdfOcrService._renderPage(pdf, pageNum, ocrOcConfig)
+          : canvas;
+        const ocrCanvas = createOcrCanvasWithoutWatermark(ocrSource);
 
         onProgress({
           page: pageNum,
@@ -88,7 +93,7 @@ export class PdfOcrService {
           status: `OCR page ${pageNum} of ${totalPages}`
         });
 
-        const result = await worker.recognize(canvas);
+        const result = await worker.recognize(ocrCanvas);
         const pageText = (result.data.text || '').trim();
         const ocrWords = result.data.words || [];
         const words = ocrWords
@@ -124,6 +129,14 @@ export class PdfOcrService {
 
         canvas.width = 0;
         canvas.height = 0;
+        if (ocrSource !== canvas) {
+          ocrSource.width = 0;
+          ocrSource.height = 0;
+        }
+        if (ocrCanvas !== canvas && ocrCanvas !== ocrSource) {
+          ocrCanvas.width = 0;
+          ocrCanvas.height = 0;
+        }
 
         if (pageHasClosing(pageText)) {
           break;
@@ -148,7 +161,8 @@ export class PdfOcrService {
 
   private static async _renderPage(
     pdf: PDFDocumentProxy,
-    pageNum: number
+    pageNum: number,
+    optionalContentConfig?: Awaited<ReturnType<PDFDocumentProxy['getOptionalContentConfig']>>
   ): Promise<HTMLCanvasElement> {
     const page = await pdf.getPage(pageNum);
     const unscaled = page.getViewport({ scale: 1 });
@@ -168,7 +182,10 @@ export class PdfOcrService {
 
     const renderTask = page.render({
       canvasContext: context,
-      viewport
+      viewport,
+      ...(optionalContentConfig
+        ? { optionalContentConfigPromise: Promise.resolve(optionalContentConfig) }
+        : {})
     });
     await renderTask.promise;
 
