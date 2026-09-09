@@ -31,7 +31,18 @@ export const UNDERLINE = {
   mergeGapMax: 48,
   mergeGapWordFactor: 1.5,
   /** Isolated underlined words shorter than this are dropped as noise. */
-  dropIsolatedShorterThan: 4
+  dropIsolatedShorterThan: 4,
+  /**
+   * Grid / table rules vs letter underlines.
+   * A dark span that overshoots the letters this many px on both sides is a divider, not <u>.
+   */
+  separatorOvershootPx: 20,
+  /** A dark span this many times wider than the text cluster is a column/table rule. */
+  separatorWidthRatio: 1.5,
+  /** A dark span covering this fraction of the page width is a page rule, not an underline. */
+  pageRuleRatio: 0.78,
+  /** Letter underlines sit this close to the baseline. Rules further down are table / separators. */
+  tightLookBelow: 0.16
 };
 
 /**
@@ -92,6 +103,9 @@ function markUnderlinedWords(
       UNDERLINE.mergeGapMin,
       Math.min(UNDERLINE.mergeGapMax, Math.round(medianWordGap(line) * UNDERLINE.mergeGapWordFactor))
     );
+    if (lineLooksLikeTableRow(box, pixels, width, height, thresholds[0])) {
+      continue;
+    }
     let merged: { left: number; right: number }[] = [];
     let usedLum = thresholds[0];
     for (let index = 0; index < thresholds.length; index++) {
@@ -106,7 +120,10 @@ function markUnderlinedWords(
 
     for (let wordIndex = 0; wordIndex < line.length; wordIndex++) {
       const word = line[wordIndex];
-      if (wordOverlapsSpans(word, merged) || wordHasUnderline(word, pixels, width, height, wordThresholds)) {
+      if (
+        wordOverlapsSpans(word, merged) ||
+        wordHasUnderline(word, box, pixels, width, height, wordThresholds)
+      ) {
         word.underline = true;
       }
     }
@@ -152,6 +169,7 @@ function wordOverlapsSpans(word: IOcrWord, spans: { left: number; right: number 
 
 function wordHasUnderline(
   word: IOcrWord,
+  line: { x0: number; x1: number },
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
@@ -166,8 +184,40 @@ function wordHasUnderline(
     return false;
   }
   for (let t = 0; t < thresholds.length; t++) {
-    if (rowBandHasUnderline(pixels, width, height, row0, row1, col0, col1, thresholds[t], UNDERLINE.wordCoverage)) {
+    if (
+      rowBandHasUnderline(pixels, width, height, row0, row1, col0, col1, thresholds[t], UNDERLINE.wordCoverage) &&
+      !wordSitsOnGridRule(word, line, pixels, width, height, row0, row1, thresholds[t])
+    ) {
       return true;
+    }
+  }
+  return false;
+}
+
+function wordSitsOnGridRule(
+  word: IOcrWord,
+  line: { x0: number; x1: number },
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  row0: number,
+  row1: number,
+  maxLum: number
+): boolean {
+  for (let row = row0; row <= row1; row++) {
+    if (row < 0 || row >= height) {
+      continue;
+    }
+    const spans = darkSpansOnRow(pixels, width, row, maxLum, 8);
+    for (let index = 0; index < spans.length; index++) {
+      const span = spans[index];
+      const overlap = Math.min(word.x1, span.right) - Math.max(word.x0, span.left);
+      if (overlap < (word.x1 - word.x0) * 0.35) {
+        continue;
+      }
+      if (isGridRuleSpan(span, line.x0, line.x1, width)) {
+        return true;
+      }
     }
   }
   return false;
@@ -269,6 +319,141 @@ function medianWordGap(line: IOcrWord[]): number {
   return gaps[Math.floor(gaps.length / 2)] || 18;
 }
 
+/**
+ * True when a dark horizontal span is a table / page divider rather than ink under letters.
+ * Text underlines stay close to the glyph width; grid rules keep going past the words.
+ */
+export function isGridRuleSpan(
+  span: { left: number; right: number },
+  textLeft: number,
+  textRight: number,
+  pageWidth: number
+): boolean {
+  const textWidth = Math.max(1, textRight - textLeft);
+  const spanWidth = span.right - span.left + 1;
+  if (spanWidth >= pageWidth * UNDERLINE.pageRuleRatio) {
+    return true;
+  }
+  const overshootLeft = textLeft - span.left;
+  const overshootRight = span.right - textRight;
+  if (
+    spanWidth > textWidth * UNDERLINE.separatorWidthRatio &&
+    overshootLeft > UNDERLINE.separatorOvershootPx &&
+    overshootRight > UNDERLINE.separatorOvershootPx
+  ) {
+    return true;
+  }
+  if (
+    spanWidth > textWidth * 2 &&
+    (overshootLeft > 48 || overshootRight > 48)
+  ) {
+    return true;
+  }
+  if (overshootLeft > 12 && overshootRight > 12) {
+    return true;
+  }
+  return false;
+}
+
+function lineLooksLikeTableRow(
+  line: { x0: number; x1: number; y0: number; y1: number },
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  maxLum: number
+): boolean {
+  const lineHeight = Math.max(8, line.y1 - line.y0);
+  const below0 = Math.floor(line.y1);
+  const below1 = Math.floor(line.y1 + Math.max(3, lineHeight * 0.55));
+  const above0 = Math.floor(line.y0 - Math.max(3, lineHeight * 0.55));
+  const above1 = Math.floor(line.y0 - 1);
+  const below = bestOverlappingSpanInBand(pixels, width, height, below0, below1, line.x0, line.x1, maxLum);
+  const above = bestOverlappingSpanInBand(pixels, width, height, above0, above1, line.x0, line.x1, maxLum);
+  if (below && isGridRuleSpan(below, line.x0, line.x1, width)) {
+    return true;
+  }
+  if (below && spanHasVerticalJoins(pixels, width, height, below, maxLum)) {
+    return true;
+  }
+  if (above && below) {
+    const leftDiff = Math.abs(above.left - below.left);
+    const rightDiff = Math.abs(above.right - below.right);
+    if (leftDiff <= 18 && rightDiff <= 18 && (isGridRuleSpan(above, line.x0, line.x1, width) || spanHasVerticalJoins(pixels, width, height, above, maxLum))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function bestOverlappingSpanInBand(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  row0: number,
+  row1: number,
+  textLeft: number,
+  textRight: number,
+  maxLum: number
+): { left: number; right: number; row: number } | undefined {
+  const textWidth = Math.max(1, textRight - textLeft);
+  let best: { left: number; right: number; row: number; overlap: number } | undefined;
+  for (let row = row0; row <= row1; row++) {
+    if (row < 0 || row >= height) {
+      continue;
+    }
+    const spans = darkSpansOnRow(pixels, width, row, maxLum, 8);
+    for (let index = 0; index < spans.length; index++) {
+      const span = spans[index];
+      const overlap = Math.min(textRight, span.right) - Math.max(textLeft, span.left);
+      if (overlap < textWidth * UNDERLINE.minLineCoverage) {
+        continue;
+      }
+      if (!best || overlap > best.overlap) {
+        best = { left: span.left, right: span.right, row, overlap };
+      }
+    }
+  }
+  return best;
+}
+
+function spanHasVerticalJoins(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  span: { left: number; right: number; row: number },
+  maxLum: number
+): boolean {
+  const probe = 10;
+  const columnHasJoin = (col: number): boolean => {
+    let hits = 0;
+    for (let delta = 1; delta <= probe; delta++) {
+      if (span.row - delta >= 0 && isDarkPixel(pixels, width, span.row - delta, col, maxLum)) {
+        hits++;
+      }
+      if (span.row + delta < height && isDarkPixel(pixels, width, span.row + delta, col, maxLum)) {
+        hits++;
+      }
+    }
+    return hits >= 5;
+  };
+  return columnHasJoin(span.left) && columnHasJoin(span.right);
+}
+
+function isDarkPixel(
+  pixels: Uint8ClampedArray,
+  width: number,
+  row: number,
+  col: number,
+  maxLum: number
+): boolean {
+  if (col < 0 || col >= width) {
+    return false;
+  }
+  const index = (row * width + col) * 4;
+  const lum = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];
+  return lum < maxLum;
+}
+
 function underlineSpansUnderLine(
   line: { x0: number; x1: number; y0: number; y1: number },
   pixels: Uint8ClampedArray,
@@ -288,13 +473,18 @@ function underlineSpansUnderLine(
   }
 
   const minFragment = Math.max(18, lineWidth * 0.08);
+  const tightRow1 = Math.floor(line.y1 + Math.max(2, lineHeight * UNDERLINE.tightLookBelow));
   let bestRow = -1;
   let bestScore = 0;
+  let tightScore = 0;
   for (let row = row0; row <= row1; row++) {
     if (row < 0 || row >= height) {
       continue;
     }
     const score = underlineScoreOnRow(pixels, width, row, col0, col1, maxLum, minFragment);
+    if (row <= tightRow1 && score > tightScore) {
+      tightScore = score;
+    }
     if (score > bestScore) {
       bestScore = score;
       bestRow = row;
@@ -302,6 +492,9 @@ function underlineSpansUnderLine(
   }
   const minLine = Math.max(UNDERLINE.minLinePx, lineWidth * UNDERLINE.minLineCoverage);
   if (bestRow < 0 || bestScore < minLine) {
+    return [];
+  }
+  if (bestRow > tightRow1 && tightScore < minLine) {
     return [];
   }
 
@@ -315,7 +508,10 @@ function underlineSpansUnderLine(
       const span = spans[spanIndex];
       const left = Math.max(col0 - 6, span.left);
       const right = Math.min(col1 + 6, span.right);
-      if (right - left >= minFragment && (span.right - span.left) < width * 0.88) {
+      if (
+        right - left >= minFragment &&
+        !isGridRuleSpan(span, col0, col1, width)
+      ) {
         collected.push({ left: span.left, right: span.right });
       }
     }
@@ -335,6 +531,9 @@ function underlineScoreOnRow(
   const spans = darkSpansOnRow(pixels, width, row, maxLum, 8);
   let score = 0;
   for (let index = 0; index < spans.length; index++) {
+    if (isGridRuleSpan(spans[index], col0, col1, width)) {
+      continue;
+    }
     const left = Math.max(col0, spans[index].left);
     const right = Math.min(col1, spans[index].right);
     const overlap = right - left;

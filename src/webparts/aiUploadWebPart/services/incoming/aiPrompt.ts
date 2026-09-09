@@ -8,8 +8,8 @@ export function incomingSystemPrompt(): string {
     'Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present.',
     'Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values.',
     'Organization is the left-hand addressee line immediately above a floor line such as 12/F, or if there is no xx/F, immediately above a line containing xxx Road. The address is only on the left of the page; ignore Our Ref, Date, and other text on the right of the same row. Do not use the letterhead.',
-    'Sender is exactly the text inside the signature parentheses, for example (Ben xXx. LXX) -> Ben xXx. LXX. Take that inner text below Yours faithfully / Yours sincerely / Yours truly / 署名. Skip (signed) and (Attn: ...). Do not copy the job title under the parentheses.',
-    'Receiver is the text immediately below Yours faithfully / Yours sincerely / Yours truly, in that same column. Do not use CC / c.c. / 副本, whether it sits to the left of the signature or below the signature. Skip (signed), the sender parentheses, and the job title.',
+    'Sender is exactly the text inside the parentheses immediately below Yours faithfully / Yours sincerely / Yours truly / 署名, for example (Ben xXx. LXX) -> Ben xXx. LXX. That closing is often on the last page, not page 1. Skip (signed). Do not copy CC / c.c. / 副本 names below the signature. Do not copy parentheses from Attn or the address on page 1. Do not copy the job title under the parentheses.',
+    'Receiver is the Attn value when Attn / Attention is present. If there is no Attn, Receiver is the first left-hand address line above Dear / 敬啟者.',
     'Ref No is Our Ref / 本處檔號 / 檔號 of the originating party, not Your Ref.',
     'Project Number is the 8 digits immediately before the slash in Your Ref / 貴處檔號 / 來函編號; if there is no slash, the 8 digits immediately before the hyphen. Do not take Project Number from Our Ref.',
     'Do not invent values.'
@@ -25,7 +25,7 @@ export function incomingBodyImageLabel(): string {
 }
 
 export function incomingClosingImageLabel(): string {
-  return 'Closing / signature block. Receiver is the line immediately below Yours faithfully / Yours sincerely, not CC to the left of or below the signature. Sender is the text INSIDE the signature parentheses:';
+  return 'Closing / signature block. Sender is the text INSIDE the signature parentheses:';
 }
 
 export function buildIncomingUserPrompt(
@@ -46,11 +46,11 @@ export function buildIncomingUserPrompt(
     ? [
       'Extract these fields from an incoming letter sent TO AECOM.',
       'Images: full first page, letterhead at the top, the body after the salutation, then the signature block if detected.',
-      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road. Not the whole row and not the letterhead. Receiver is the text immediately below Yours faithfully / Yours sincerely, not CC left of or below the signature. Ignore Our Ref / Date on the right. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>. Sender is the text inside the signature parentheses.'
+      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road. Not the whole row and not the letterhead. Receiver is the Attn value if present; if there is no Attn, it is the first left-hand address line above Dear. Ignore Our Ref / Date on the right. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider. Sender is the text inside the signature parentheses.'
     ]
     : [
       'Extract these fields from the OCR text of an incoming letter sent TO AECOM.',
-      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road, above Dear / 敬啟者. Not the whole row and not the letterhead. Ignore right-column Our Ref / Date. Sender is the text inside the signature parentheses. Receiver is the text immediately below Yours faithfully / Yours sincerely, not CC. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>.'
+      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road, above Dear / 敬啟者. Not the whole row and not the letterhead. Ignore right-column Our Ref / Date. Sender is the text inside the signature parentheses. Receiver is the Attn value if present; if there is no Attn, the first left-hand address line above Dear. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider.'
     ];
 
   const parts = [
@@ -68,16 +68,16 @@ export function buildIncomingUserPrompt(
     parts.push('', 'Detected incoming letter type:', letterType);
   }
   if (signature && signature.senderName) {
-    parts.push('', 'Detected Sender from the text inside the signature parentheses:', signature.senderName);
+    parts.push('', 'Detected Sender from the parentheses immediately below Yours sincerely / Yours faithfully, not from CC:', signature.senderName);
   } else if (signature && signature.textBelow) {
-    parts.push('', 'OCR immediately below the signature. Sender is the text INSIDE parentheses, not (signed) and not the job title under them:', signature.textBelow);
+    parts.push('', 'OCR immediately below the signature. Sender is the text INSIDE parentheses immediately below Yours sincerely / Yours faithfully. Do not copy CC / c.c. / 副本:', signature.textBelow);
   } else {
     parts.push('', 'Copy the text inside the signature parentheses below Yours faithfully / Yours sincerely / Yours truly / 署名. Skip (signed). For a memo, use From:.');
   }
   if (receiverName && receiverName.trim()) {
-    parts.push('', 'Detected Receiver from the line immediately below Yours faithfully / Yours sincerely, not from CC:', receiverName.trim());
+    parts.push('', 'Detected Receiver from Attn, or if there is no Attn, from the first left-hand address line above Dear:', receiverName.trim());
   } else {
-    parts.push('', 'Receiver is the text immediately below Yours faithfully / Yours sincerely in that same column. Do not copy CC / c.c. / 副本 to the left of the signature or below the signature.');
+    parts.push('', 'Receiver is the value after Attn: / Attention: if present. If there is no Attn, copy the first left-hand address line above Dear / 敬啟者. Do not use the line below Yours faithfully.');
   }
   if (organization && organization.trim()) {
     parts.push('', 'Detected Organization from the LEFT-HAND line above xx/F or xxx Road in the addressee address (not the whole row, not the letterhead):', organization.trim());
@@ -109,8 +109,8 @@ function incomingFieldHelp(): string {
     'Project Number: 8 digits immediately before the slash in Your Ref: / Your Ref : / 貴處檔號 / 來函編號. Example Your Ref: 12345678/ABC -> 12345678. If there is no slash, take the 8 digits immediately before the hyphen. Digits only. Do not use Our Ref.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
     'Organization: in the LEFT addressee address above Dear / 敬啟者, find a floor line such as 12/F or G/F and copy only the left-hand line immediately above it. If there is no xx/F, find a line containing xxx Road and copy the left-hand line immediately above that. Do not include Our Ref, Your Ref, Date, or other text on the right of that row. Do not use letterhead.',
-    'Sender: copy ONLY the text inside the signature parentheses, e.g. (Ben xXx. LXX) -> Ben xXx. LXX. Prefer parentheses below Yours faithfully / Yours sincerely / Yours truly / 署名. Do not copy parentheses from Attn: near the top. Skip (signed). Do not copy the job title under the parentheses. For a memo or email with no signature parentheses, use From:.',
-    'Receiver: copy the text immediately below Yours faithfully / Yours sincerely / Yours truly, in the same column as that closing. That is Receiver. Do not copy CC / c.c. / 副本 / copy to, whether it is to the left of the handwritten signature or below the signature. Skip (signed), sender parentheses, and job titles under the signature. Only if that closing line is missing, use Attn: or the first left-hand address line above Dear.',
+    'Sender: copy ONLY the text inside the parentheses immediately below Yours faithfully / Yours sincerely / Yours truly / 署名, e.g. (Ben xXx. LXX) -> Ben xXx. LXX. Look on the page that contains that closing, which is often the last page, not the first page. Skip (signed). Do not copy CC / c.c. / 副本 / copy to names, whether they sit below the signature. Do not copy parentheses from Attn: near the top of page 1. Do not copy the job title under the parentheses. For a memo or email with no signature parentheses, use From:.',
+    'Receiver: if Attn: / Attn : / Attention: is present, copy only the value after that label. If there is no Attn, copy the first left-hand address line above Dear / 敬啟者. Do not use the line below Yours faithfully. Ignore Our Ref / Date on the right of the same row.',
     'Subject:\n' + OUTGOING_SUBJECT_PROMPT,
     'File No: file number if shown separately from Ref No.',
     'Ref No: copy the value to the right of Our Ref: / 本處檔號 / 檔號. OCR may read Ref as Rref or Reef. Do not use Your Ref.',

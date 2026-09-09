@@ -5,17 +5,14 @@ export const OUTGOING_SUBJECT_PROMPT: string = [
   'Strictly extract content from the letter body ONLY, which is the text that appears AFTER the salutation (Dear Sir / Dear Madam / Dear Sir or Madam / etc.) and BEFORE the closing (Yours faithfully / Yours sincerely / Yours truly).',
   '',
   'Primary instruction (must follow first):',
-  '- After the salutation, find lines that contain both <b> bold and <u> underlined text.',
+  '- After the salutation, find lines that contain both <b> bold and <u> underlined text on the same words.',
   '- Copy each matching line in full, including words on the same line that are not inside the tags.',
   '- If the next matching line is a wrap of the same heading, join it with a single space. Do not join lines that are far apart.',
+  '- Do not treat table grid lines, cell borders, or page separator rules as underlines. A horizontal rule under a row is not a letter underline. Do not copy the line of text that merely sits above a table or divider.',
   '',
   'If no line has both bold and underline:',
-  '- Then copy the first underlined <u> line only.',
-  '- Then copy the bold heading in the same body range. Prefer text wrapped in <b>...</b> tags.',
-  '- Do not copy a random bold word inside a normal sentence.',
-  '',
-  'Fallback (only if there is absolutely no underline or bold heading anywhere in the body):',
   '- Then extract the Re: or Subject: line that appears in the same body range.',
+  '- Do not fall back to the first underlined line or a line that only has a rule underneath it.',
   '',
   'Do not include the salutation or the closing in the result.',
   'Do not copy <u>, </u>, <b>, or </b> tags into the field value.'
@@ -26,7 +23,7 @@ export function outgoingSystemPrompt(): string {
 }
 
 export function outgoingBodyImageLabel(): string {
-  return 'Letter body AFTER the salutation and BEFORE the closing. Subject: copy the entire first line that has both <b> and <u>. If none, the first underlined line, then bold heading. Fallback: Re: or Subject: line:';
+  return 'Letter body AFTER the salutation and BEFORE the closing. Subject: copy the entire first line that has both <b> and <u> on the same words. Do not use a line that only sits above a table or divider. Fallback: Re: or Subject: line:';
 }
 
 export function outgoingClosingImageLabel(): string {
@@ -49,11 +46,11 @@ export function buildOutgoingUserPrompt(
     ? [
       'Extract these fields from the first page of a scanned document.',
       'Images: full first page, the addressee area for By Post / By Hand / Attn, the heading after Dear Sir, then the signature block if detected.',
-      'Organization is every full line containing Department that sits below Our Ref and above Dear. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director lines and keep going up). Omit Mr./Ms. and parenthetical text. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>. Sender is the printed name immediately below the signature.'
+      'Organization is every full line containing Department that sits below Our Ref and above Dear. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director lines and keep going up). Omit Mr./Ms. and parenthetical text. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider. Sender is the printed name immediately below the signature.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Organization is every full line containing Department that sits below Our Ref and above Dear. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director and keep going up). Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u>.'
+      'Organization is every full line containing Department that sits below Our Ref and above Dear. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director and keep going up). Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider.'
     ];
 
   const parts = [

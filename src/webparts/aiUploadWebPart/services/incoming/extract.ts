@@ -109,29 +109,16 @@ export function extractIncomingSenderLocated(pages: IOcrPageResult[]): IPickedVa
     if (!pageHasIncomingYoursClosing(list[index])) {
       continue;
     }
-    const name = signatureParenthesesOnPage(list[index]);
+    const name = parentheticalNameBelowClosing(list[index]);
     if (name) {
       return picked(name, '署名括號');
     }
-  }
-  for (let index = list.length - 1; index >= 0; index--) {
-    const name = signatureParenthesesOnPage(list[index]);
-    if (name) {
-      return picked(name, '署名括號');
+    const labeled = parentheticalNameAfter署名Label(list[index]);
+    if (labeled) {
+      return picked(labeled, '署名括號');
     }
   }
   return picked('', '');
-}
-
-function signatureParenthesesOnPage(page?: IOcrPageResult): string {
-  if (!page) {
-    return '';
-  }
-  const fromClosing = parentheticalNameBelowClosing(page);
-  if (fromClosing) {
-    return fromClosing;
-  }
-  return parentheticalNameAfter署名Label(page);
 }
 
 function pageHasIncomingYoursClosing(page?: IOcrPageResult): boolean {
@@ -167,7 +154,25 @@ export function incomingSenderName(value: string): string {
 }
 
 export function incomingSignatureParenName(value: string): string {
-  return signatureParenthesesInner(value);
+  return signatureParenthesesInner(prefixBeforeIncomingCc(textBeforeIncomingCc(value)));
+}
+
+function textBeforeIncomingCc(text: string): string {
+  const lines = (text || '').split(/\r?\n/);
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (isIncomingCcLine(lines[index])) {
+      break;
+    }
+    const before = prefixBeforeIncomingCc(lines[index]);
+    if (before) {
+      kept.push(before);
+    }
+    if (before !== stripIncomingMarkup(lines[index])) {
+      break;
+    }
+  }
+  return kept.join('\n');
 }
 
 export function extractIncomingReceiver(pages?: IOcrPageResult[] | IOcrPageResult): string {
@@ -176,21 +181,6 @@ export function extractIncomingReceiver(pages?: IOcrPageResult[] | IOcrPageResul
 
 export function extractIncomingReceiverLocated(pages?: IOcrPageResult[] | IOcrPageResult): IPickedValue {
   const list = !pages ? [] : Array.isArray(pages) ? pages : [pages];
-  for (let index = list.length - 1; index >= 0; index--) {
-    if (!pageHasIncomingYoursClosing(list[index])) {
-      continue;
-    }
-    const value = receiverDirectlyBelowYours(list[index]);
-    if (value) {
-      return picked(value, 'Yours faithfully 正下方');
-    }
-  }
-  for (let index = list.length - 1; index >= 0; index--) {
-    const value = receiverDirectlyBelowYours(list[index]);
-    if (value) {
-      return picked(value, 'Yours faithfully 正下方');
-    }
-  }
   const firstPage = list[0];
   if (!firstPage) {
     return picked('', '');
@@ -199,136 +189,11 @@ export function extractIncomingReceiverLocated(pages?: IOcrPageResult[] | IOcrPa
   if (fromAttn) {
     return picked(fromAttn, 'Attn');
   }
-  return picked(firstAddressLineAboveDear(firstPage), 'Dear 上方地址');
-}
-
-function receiverDirectlyBelowYours(page?: IOcrPageResult): string {
-  if (!page) {
-    return '';
+  const fromAddress = firstAddressLineAboveDear(firstPage);
+  if (fromAddress) {
+    return picked(fromAddress, 'Dear 上方地址第一行');
   }
-  const fromWords = receiverDirectlyBelowYoursFromWords(page);
-  if (fromWords) {
-    return fromWords;
-  }
-  return receiverDirectlyBelowYoursFromText(page.text || '');
-}
-
-function receiverDirectlyBelowYoursFromWords(page: IOcrPageResult): string {
-  const closing = findIncomingYoursClosingHit(page);
-  if (!closing) {
-    return '';
-  }
-  const lineHeight = Math.max(closing.y1 - closing.y0, 12);
-  const maxY = closing.y1 + Math.max(lineHeight * 3.4, (page.height || 0) * 0.10);
-  const colLeft = closing.x0 - Math.max(12, (page.width || 0) * 0.015);
-  const colRight = Math.max(
-    closing.x1 + 12,
-    closing.x0 + Math.max(closing.x1 - closing.x0, (page.width || 0) * 0.40)
-  );
-  const under = (page.words || []).filter((word) => {
-    const midX = (word.x0 + word.x1) / 2;
-    const midY = (word.y0 + word.y1) / 2;
-    return midY >= closing.y1 - 2 &&
-      word.y0 <= maxY &&
-      midX >= colLeft &&
-      midX <= colRight;
-  });
-  const lines = groupWordsIntoLines(under);
-  for (let index = 0; index < lines.length; index++) {
-    const text = stripIncomingMarkup(lines[index].text);
-    if (isIncomingCcLine(text)) {
-      break;
-    }
-    if (isIncomingReceiverSkipLine(text)) {
-      continue;
-    }
-    return text.replace(/\s+/g, ' ').trim();
-  }
-  return '';
-}
-
-function receiverDirectlyBelowYoursFromText(text: string): string {
-  const lines = stripIncomingMarkup(text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter((line) => line.length > 0);
-  let closingIndex = -1;
-  for (let index = 0; index < lines.length; index++) {
-    const combined = lines[index + 1] ? (lines[index] + ' ' + lines[index + 1]) : lines[index];
-    if (isIncomingYoursClosingPhrase(lines[index]) || isIncomingYoursClosingPhrase(combined) || isIncomingReceiverClosingPhrase(lines[index])) {
-      closingIndex = index;
-    }
-  }
-  if (closingIndex < 0) {
-    return '';
-  }
-  const remainder = textAfterIncomingClosing(lines[closingIndex]);
-  const after = remainder ? [remainder] : [];
-  const limit = Math.min(lines.length, closingIndex + 5);
-  for (let index = closingIndex + 1; index < limit; index++) {
-    after.push(lines[index]);
-  }
-  for (let index = 0; index < after.length; index++) {
-    const line = after[index];
-    if (isIncomingCcLine(line)) {
-      break;
-    }
-    if (isIncomingReceiverSkipLine(line)) {
-      continue;
-    }
-    return line.replace(/\s+/g, ' ').trim();
-  }
-  return '';
-}
-
-function isIncomingReceiverClosingPhrase(line: string): boolean {
-  const plain = stripIncomingMarkup(line);
-  return /^此致/.test(plain) && plain.length <= 12;
-}
-
-function isIncomingCcLine(text: string): boolean {
-  const key = stripIncomingMarkup(text).toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!key) {
-    return false;
-  }
-  return /^(c\.?\s*c\.?|cc|copy\s+to|copied\s+to|副本|抄送|副本送|副本抄送)\b/.test(key) ||
-    /^(c\.?\s*c\.?|cc)\s*[:：]/.test(key);
-}
-
-function isIncomingReceiverSkipLine(text: string): boolean {
-  const plain = stripIncomingMarkup(text);
-  if (!plain) {
-    return true;
-  }
-  if (isIncomingYoursClosingPhrase(plain) || isIncomingReceiverClosingPhrase(plain) || isIncomingOtherClosingPhrase(plain)) {
-    return true;
-  }
-  if (isIncomingCcLine(plain) || isIncomingIgnorableParen(plain)) {
-    return true;
-  }
-  if (isIncomingSignatureParenLine(plain) || isIncomingJobOrDeptLine(plain)) {
-    return true;
-  }
-  if (/^for and on behalf\b/i.test(plain) || /^for (?:the )?director of\b/i.test(plain)) {
-    return true;
-  }
-  if (/^(encl|enc|encls|enclosure|enclosures|附件|隨函)\b/i.test(plain)) {
-    return true;
-  }
-  return false;
-}
-
-function isIncomingSignatureParenLine(text: string): boolean {
-  const plain = stripIncomingMarkup(text);
-  if (!plain) {
-    return false;
-  }
-  if (/^[(\uFF08]\s*(signed|signature|sgd)\s*[)\uFF09]$/i.test(plain)) {
-    return true;
-  }
-  const inner = signatureParenthesesInner(plain);
-  if (!inner) {
-    return false;
-  }
-  const without = plain.replace(/[[(\uFF08【][^)\uFF09\]】]*[)\uFF09\]】]/g, '').replace(/\s+/g, ' ').trim();
-  return without.length === 0 || isIncomingJobOrDeptLine(without);
+  return picked('', '');
 }
 
 function extractIncomingAttn(page: IOcrPageResult): string {
@@ -1032,60 +897,86 @@ function parentheticalNameBelowClosingFromWords(page: IOcrPageResult): string {
   if (!closing) {
     return '';
   }
-  const maxY = closing.y1 + Math.max(220, (page.height || 0) * 0.22);
-  const below = (page.words || []).filter((word) => {
-    return word.y0 >= closing.y1 - 6 && word.y0 <= maxY;
-  }).slice().sort((left, right) => {
-    if (Math.abs(left.y0 - right.y0) > 8) {
-      return left.y0 - right.y0;
-    }
-    return left.x0 - right.x0;
-  });
-  const sameLineRemainder = (page.words || []).filter((word) => {
+  const lineHeight = Math.max(closing.y1 - closing.y0, 12);
+  const maxY = closing.y1 + Math.max(lineHeight * 8, (page.height || 0) * 0.16);
+  const colLeft = closing.x0 - Math.max(24, (page.width || 0) * 0.05);
+  const colRight = Math.max(
+    closing.x1 + Math.max(36, (page.width || 0) * 0.08),
+    closing.x0 + Math.max(closing.x1 - closing.x0, (page.width || 0) * 0.38)
+  );
+  const inColumn = (word: IOcrWord): boolean => {
+    const mid = (word.x0 + word.x1) / 2;
+    return mid >= colLeft && mid <= colRight;
+  };
+  const remainderWords = (page.words || []).filter((word) => {
     const midY = (word.y0 + word.y1) / 2;
     return midY >= closing.y0 - 4 &&
       midY <= closing.y1 + 4 &&
-      word.x0 >= closing.x0 + 8;
+      word.x0 >= closing.x1 - 2 &&
+      inColumn(word);
   });
-  const styled = [
-    formatOcrTextWithStyles(sameLineRemainder),
-    formatOcrTextWithStyles(below) || joinOcrWords(below)
-  ].filter((item) => item && item.trim()).join('\n');
-  const fromStyled = signatureParenthesesInner(styled);
-  if (fromStyled) {
-    return fromStyled;
-  }
-  let index = 0;
-  const search = sameLineRemainder.concat(below);
-  while (index < search.length) {
-    const open = nextIncomingOpenParenIndex(search, index);
-    if (open < 0) {
-      return '';
-    }
-    const close = nextIncomingCloseParenIndex(search, open);
-    const group = close >= 0
-      ? search.slice(open, close + 1)
-      : search.slice(open, Math.min(search.length, open + 12));
-    if (group.length > 24) {
-      index = open + 1;
+  const belowWords = (page.words || []).filter((word) => {
+    return word.y0 >= closing.y1 - 4 && word.y0 <= maxY && inColumn(word);
+  });
+  return firstParentheticalNameBeforeCc([
+    formatOcrTextWithStyles(remainderWords) || joinOcrWords(remainderWords),
+    ...groupWordsIntoLines(belowWords).map((line) => formatOcrTextWithStyles(line.words || []) || line.text)
+  ]);
+}
+
+function firstParentheticalNameBeforeCc(parts: string[]): string {
+  let buffer = '';
+  for (let index = 0; index < parts.length; index++) {
+    const raw = stripIncomingMarkup(parts[index] || '');
+    if (!raw) {
       continue;
     }
-    const joined = joinOcrWords(group);
-    index = close >= 0 ? close + 1 : open + 1;
-    if (matchAttnLine(stripIncomingMarkup(joined)) || isIncomingAttnParenInner(stripIncomingMarkup(joined))) {
+    if (isIncomingCcLine(raw)) {
+      break;
+    }
+    const beforeCc = prefixBeforeIncomingCc(raw);
+    if (!beforeCc) {
+      break;
+    }
+    const fromLine = signatureParenthesesInner(beforeCc);
+    if (fromLine) {
+      return fromLine;
+    }
+    if (beforeCc !== raw) {
+      break;
+    }
+    if (isIncomingJobOrDeptLine(beforeCc) || isIncomingIgnorableParen(beforeCc.replace(/[[(\uFF08【)\uFF09\]】]/g, ' ').replace(/\s+/g, ' ').trim())) {
       continue;
     }
-    const inner = signatureParenthesesInner(joined);
-    if (inner) {
-      return inner;
+    buffer = (buffer + ' ' + beforeCc).replace(/\s+/g, ' ').trim();
+    const fromBuffer = signatureParenthesesInner(buffer);
+    if (fromBuffer) {
+      return fromBuffer;
     }
   }
   return '';
 }
 
+function isIncomingCcLine(text: string): boolean {
+  const key = stripIncomingMarkup(text).toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!key) {
+    return false;
+  }
+  return /^(c\.?\s*c\.?|cc|copy\s+to|copied\s+to|副本|抄送|副本送|副本抄送)\b/.test(key) ||
+    /^(c\.?\s*c\.?|cc)\s*[:：]/.test(key);
+}
+
+function prefixBeforeIncomingCc(text: string): string {
+  const plain = stripIncomingMarkup(text);
+  const cut = plain.match(/^(.*?)(?:\s+(?:c\.?\s*c\.?|cc|copy\s+to|copied\s+to|副本|抄送)\b)/i);
+  if (!cut) {
+    return plain;
+  }
+  return (cut[1] || '').replace(/\s+/g, ' ').trim();
+}
+
 function findIncomingClosingHit(page: IOcrPageResult): IIncomingClosingHit | undefined {
-  const dearY = incomingSalutationY(page);
-  const minY = dearY >= 0 ? dearY + 6 : Math.max(40, (page.height || 0) * 0.40);
+  const minY = incomingClosingMinY(page);
   const yours = findIncomingClosingHitByKind(page, minY, 'yours');
   if (yours) {
     return yours;
@@ -1093,26 +984,12 @@ function findIncomingClosingHit(page: IOcrPageResult): IIncomingClosingHit | und
   return findIncomingClosingHitByKind(page, minY, 'other');
 }
 
-function findIncomingYoursClosingHit(page: IOcrPageResult): IIncomingClosingHit | undefined {
+function incomingClosingMinY(page: IOcrPageResult): number {
   const dearY = incomingSalutationY(page);
-  const minY = dearY >= 0 ? dearY + 6 : Math.max(40, (page.height || 0) * 0.40);
-  const yours = findIncomingClosingHitByKind(page, minY, 'yours');
-  if (yours) {
-    return yours;
+  if (dearY >= 0) {
+    return dearY + 6;
   }
-  const lines = groupWordsIntoLines(page.words || []);
-  for (let index = lines.length - 1; index >= 0; index--) {
-    if (lines[index].y0 < minY || !isIncomingReceiverClosingPhrase(lines[index].text)) {
-      continue;
-    }
-    return {
-      x0: lines[index].x0,
-      x1: lines[index].x1,
-      y0: lines[index].y0,
-      y1: lines[index].y1
-    };
-  }
-  return undefined;
+  return 0;
 }
 
 function findIncomingClosingHitByKind(
@@ -1189,60 +1066,25 @@ function findIncomingClosingHitFromWords(
   return hit;
 }
 
-function nextIncomingOpenParenIndex(words: IOcrWord[], start: number): number {
-  for (let index = start; index < words.length; index++) {
-    if (/[[(\uFF08【]/.test(words[index].text || '')) {
-      return index;
-    }
-  }
-  return -1;
-}
-
-function nextIncomingCloseParenIndex(words: IOcrWord[], start: number): number {
-  for (let index = start; index < words.length; index++) {
-    const text = words[index].text || '';
-    if (index === start && /[[(\uFF08【]/.test(text) && !/[)\uFF09\]】]/.test(text)) {
-      continue;
-    }
-    if (/[)\uFF09\]】]/.test(text)) {
-      return index;
-    }
-  }
-  return -1;
-}
-
 function parentheticalNameBelowClosingFromLines(page: IOcrPageResult): string {
   const lines = groupWordsIntoLines(page.words || []);
-  const dearY = incomingSalutationY(page);
-  const minY = dearY >= 0 ? dearY + 6 : Math.max(40, (page.height || 0) * 0.40);
+  const minY = incomingClosingMinY(page);
   const closingIndex = lastIncomingClosingIndex(lines.map((line) => line.text), minY, lines);
   if (closingIndex < 0) {
     return '';
   }
-  const after: string[] = [];
+  const parts: string[] = [];
   const remainder = textAfterIncomingClosing(lines[closingIndex].text);
   if (remainder) {
-    after.push(remainder);
+    parts.push(remainder);
   }
-  for (let index = closingIndex + 1; index < lines.length && after.length < 12; index++) {
+  for (let index = closingIndex + 1; index < lines.length && parts.length < 10; index++) {
     if (lines[index].y0 < lines[closingIndex].y1 - 2) {
       continue;
     }
-    const plain = stripIncomingMarkup(lines[index].text);
-    if (after.length > 0 && isIncomingJobOrDeptLine(plain) && !hasUnclosedIncomingParen(after.join(' '))) {
-      break;
-    }
-    after.push(lines[index].text);
+    parts.push(formatOcrTextWithStyles(lines[index].words || []) || lines[index].text);
   }
-  let buffer = '';
-  for (let index = 0; index < after.length; index++) {
-    buffer = (buffer + ' ' + after[index]).replace(/\s+/g, ' ').trim();
-    const inner = signatureParenthesesInner(buffer);
-    if (inner) {
-      return inner;
-    }
-  }
-  return '';
+  return firstParentheticalNameBeforeCc(parts);
 }
 
 function parentheticalNameBelowClosingFromText(text: string): string {
@@ -1251,23 +1093,16 @@ function parentheticalNameBelowClosingFromText(text: string): string {
   if (closingIndex < 0) {
     return '';
   }
-  let buffer = textAfterIncomingClosing(lines[closingIndex]);
-  const fromRemainder = signatureParenthesesInner(buffer);
-  if (fromRemainder) {
-    return fromRemainder;
+  const parts: string[] = [];
+  const remainder = textAfterIncomingClosing(lines[closingIndex]);
+  if (remainder) {
+    parts.push(remainder);
   }
   const limit = Math.min(lines.length, closingIndex + 8);
   for (let index = closingIndex + 1; index < limit; index++) {
-    if (isIncomingJobOrDeptLine(lines[index]) && !hasUnclosedIncomingParen(buffer)) {
-      break;
-    }
-    buffer = (buffer + ' ' + lines[index]).replace(/\s+/g, ' ').trim();
-    const inner = signatureParenthesesInner(buffer);
-    if (inner) {
-      return inner;
-    }
+    parts.push(lines[index]);
   }
-  return '';
+  return firstParentheticalNameBeforeCc(parts);
 }
 
 function parentheticalNameAfter署名Label(page: IOcrPageResult): string {
@@ -1277,13 +1112,6 @@ function parentheticalNameAfter署名Label(page: IOcrPageResult): string {
     return '';
   }
   return cleanIncomingSenderName((labeled[1] || '').replace(/\s+/g, ' ').trim());
-}
-
-function hasUnclosedIncomingParen(text: string): boolean {
-  const plain = stripIncomingMarkup(text);
-  const lastOpen = Math.max(plain.lastIndexOf('('), plain.lastIndexOf('\uFF08'));
-  const lastClose = Math.max(plain.lastIndexOf(')'), plain.lastIndexOf('\uFF09'));
-  return lastOpen >= 0 && lastOpen > lastClose;
 }
 
 function lastIncomingClosingIndex(texts: string[], minY: number, lines?: ILine[]): number {
