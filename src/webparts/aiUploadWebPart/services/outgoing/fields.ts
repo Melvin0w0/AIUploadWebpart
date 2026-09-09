@@ -1,7 +1,7 @@
 // Outgoing Convert rules only. Incoming lives in services/incoming/.
 import { isOrganizationField, isReceiverField, isRefNoField, isSenderField, isSubjectField } from '../../constants/defaultFormFields';
 import { isProjectNumberField, projectNumberFromRef, sanitizeProjectNumber } from '../../constants/projectNumber';
-import { IAiExtractionHints, IDetectedFields, emptyDetectedFields, tryText, tryTextAsync } from '../correspondenceTypes';
+import { IAiExtractionHints, IDetectedFields, IPickedValue, emptyDetectedFields, picked, tryText, tryTextAsync } from '../correspondenceTypes';
 import { extractOurRefNo, extractOurRefOnly } from '../fieldExtractor';
 import { IOcrPageResult } from '../IPdfOcr';
 import { analyzeDocumentSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir, subjectAppearsInPage } from '../signatureSender';
@@ -12,10 +12,28 @@ export async function detectOutgoingFields(pages: IOcrPageResult[]): Promise<IDe
   const detected = emptyDetectedFields(firstPage);
   detected.signature = await analyzeDocumentSignature(list);
   detected.receiverName = tryText(() => extractReceiverAboveDearSir(firstPage));
+  if (detected.receiverName) {
+    detected.sources.receiver = 'Attn / Dear 上方';
+  }
   detected.organization = tryText(() => extractOrganizationAboveAddressee(firstPage));
+  if (detected.organization) {
+    detected.sources.organization = 'Department 行';
+  }
   detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
+  if (detected.subjectText) {
+    detected.sources.subject = 'Dear 後粗體+底線';
+  }
   detected.refNo = tryText(() => extractOurRefNo(list));
+  if (detected.refNo) {
+    detected.sources.refNo = 'Our Ref';
+  }
   detected.projectNumber = tryText(() => projectNumberFromRef(extractOurRefOnly(list)));
+  if (detected.projectNumber) {
+    detected.sources.projectNumber = 'Our Ref';
+  }
+  if (detected.signature.senderName) {
+    detected.sources.sender = '簽署下方姓名';
+  }
   return detected;
 }
 
@@ -24,27 +42,55 @@ export function pickOutgoingFieldValue(
   detected: IDetectedFields,
   aiValue: string,
   keywordValue: string
-): string {
+): IPickedValue {
   if (isSenderField(label)) {
-    return detected.signature.senderName || asPersonName(aiValue || '');
+    if (detected.signature.senderName) {
+      return picked(detected.signature.senderName, detected.sources.sender || '簽署下方姓名');
+    }
+    return picked(asPersonName(aiValue || ''), 'AI');
   }
   if (isReceiverField(label)) {
-    return detected.receiverName || firstAiLine(aiValue);
+    if (detected.receiverName) {
+      return picked(detected.receiverName, detected.sources.receiver || 'Attn / Dear 上方');
+    }
+    return picked(firstAiLine(aiValue), 'AI');
   }
   if (isSubjectField(label)) {
-    return detected.subjectText || groundedSubject(detected.firstPage, aiValue);
+    if (detected.subjectText) {
+      return picked(detected.subjectText, detected.sources.subject || 'Dear 後粗體+底線');
+    }
+    return picked(groundedSubject(detected.firstPage, aiValue), 'AI');
   }
   if (isRefNoField(label)) {
-    return detected.refNo || (aiValue || '').trim();
+    if (detected.refNo) {
+      return picked(detected.refNo, detected.sources.refNo || 'Our Ref');
+    }
+    return picked((aiValue || '').trim(), 'AI');
   }
   if (isProjectNumberField(label)) {
-    return detected.projectNumber || sanitizeProjectNumber(aiValue || '') || keywordValue || '';
+    if (detected.projectNumber) {
+      return picked(detected.projectNumber, detected.sources.projectNumber || 'Our Ref');
+    }
+    const fromAi = sanitizeProjectNumber(aiValue || '');
+    if (fromAi) {
+      return picked(fromAi, 'AI');
+    }
+    return picked(keywordValue || '', '關鍵字');
   }
   if (isOrganizationField(label)) {
     const aiOrganization = (aiValue || '').trim().split(/\r?\n/)[0].trim();
-    return detected.organization || aiOrganization || keywordValue || '';
+    if (detected.organization) {
+      return picked(detected.organization, detected.sources.organization || 'Department 行');
+    }
+    if (aiOrganization) {
+      return picked(aiOrganization, 'AI');
+    }
+    return picked(keywordValue || '', '關鍵字');
   }
-  return (aiValue && aiValue.trim()) || keywordValue || '';
+  if (aiValue && aiValue.trim()) {
+    return picked(aiValue.trim(), 'AI');
+  }
+  return picked(keywordValue || '', '關鍵字');
 }
 
 export function outgoingAiHints(detected: IDetectedFields): IAiExtractionHints {

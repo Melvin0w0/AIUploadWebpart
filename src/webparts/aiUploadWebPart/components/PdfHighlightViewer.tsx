@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { IOcrPageResult } from '../services/IPdfOcr';
+import { IOcrFieldMark } from '../services/ocrFieldMarks';
 import { joinOcrWords, wordIndexAtPoint, wordsInRect, wordsInTextRange } from '../services/ocrSelection';
 import styles from './AiUpload.module.scss';
 
@@ -7,6 +8,7 @@ export interface IPdfHighlightViewerProps {
   page: IOcrPageResult;
   selectedIndexes: number[];
   showStyles?: boolean;
+  fieldMarks?: IOcrFieldMark[];
   onSelectText: (text: string, indexes: number[]) => void;
 }
 
@@ -62,13 +64,22 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
   }
 
   public render(): React.ReactElement<IPdfHighlightViewerProps> {
-    const { page, selectedIndexes, showStyles } = this.props;
+    const { page, selectedIndexes, showStyles, fieldMarks } = this.props;
     const { displayWidth, displayHeight, isDragging, startX, startY, currentX, currentY } = this.state;
     const words = page.words || [];
     const scale = page.width > 0 && displayWidth > 0 ? displayWidth / page.width : 1;
     const highlightIndexes = isDragging
       ? wordsInTextRange(words, startX, startY, currentX, currentY)
       : selectedIndexes;
+    const marks = showStyles ? (fieldMarks || []) : [];
+    const fieldByIndex: { [key: number]: IOcrFieldMark } = {};
+    marks.forEach((mark) => {
+      (mark.indexes || []).forEach((index) => {
+        if (fieldByIndex[index] === undefined) {
+          fieldByIndex[index] = mark;
+        }
+      });
+    });
 
     return (
       <div className={styles.pdfViewer}>
@@ -92,10 +103,12 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
             >
               {words.map((word, index) => {
                 const isSelected = highlightIndexes.indexOf(index) >= 0;
+                const fieldMark = fieldByIndex[index];
                 const x = word.x0 * scale;
                 const y = word.y0 * scale;
                 const width = Math.max(1, (word.x1 - word.x0) * scale);
                 const height = Math.max(1, (word.y1 - word.y0) * scale);
+                const isFieldStart = fieldMark && fieldMark.indexes[0] === index;
                 return (
                   <g key={`${word.x0}-${word.y0}-${index}`}>
                     {showStyles && word.bold && !isSelected && (
@@ -105,6 +118,16 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                         width={width}
                         height={height}
                         className={styles.wordBold}
+                      />
+                    )}
+                    {fieldMark && (
+                      <rect
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={height}
+                        className={styles.wordFieldMark}
+                        style={{ fill: fieldMark.color, fillOpacity: 0.22 }}
                       />
                     )}
                     <rect
@@ -122,6 +145,16 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                         y2={y + height}
                         className={styles.wordUnderline}
                       />
+                    )}
+                    {isFieldStart && (
+                      <text
+                        x={x}
+                        y={Math.max(10, y - 3)}
+                        className={styles.wordFieldLabel}
+                        fill={fieldMark.color}
+                      >
+                        {fieldMark.source ? (fieldMark.label + ' · ' + fieldMark.source) : fieldMark.label}
+                      </text>
                     )}
                   </g>
                 );

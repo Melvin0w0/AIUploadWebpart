@@ -2,6 +2,11 @@ import { CorrespondenceKind } from '../constants/incomingName';
 import { IOcrPageResult } from './IPdfOcr';
 import { ISignatureAnalysis } from './signatureSender';
 
+export interface IPickedValue {
+  value: string;
+  source: string;
+}
+
 export interface IDetectedFields {
   firstPage?: IOcrPageResult;
   signature: ISignatureAnalysis;
@@ -14,6 +19,7 @@ export interface IDetectedFields {
   issueDate: string;
   memoSender: string;
   letterType: string;
+  sources: { [key: string]: string };
 }
 
 export interface IAiExtractionHints {
@@ -44,8 +50,29 @@ export function emptyDetectedFields(firstPage?: IOcrPageResult): IDetectedFields
     organization: '',
     issueDate: '',
     memoSender: '',
-    letterType: ''
+    letterType: '',
+    sources: {}
   };
+}
+
+export function picked(value: string, source: string): IPickedValue {
+  const text = value || '';
+  if (!text.trim()) {
+    return { value: '', source: '' };
+  }
+  return { value: text, source };
+}
+
+export function tryPicked(fn: () => IPickedValue): IPickedValue {
+  try {
+    const result = fn();
+    if (!result || !result.value) {
+      return picked('', '');
+    }
+    return result;
+  } catch {
+    return picked('', '');
+  }
 }
 
 export function tryText(fn: () => string): string {

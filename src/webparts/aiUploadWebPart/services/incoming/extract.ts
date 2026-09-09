@@ -1,6 +1,7 @@
 // Incoming OCR locators only. Outgoing lives in services/outgoing/.
 import { formatIssueDate, parseIssueDate } from '../../constants/issueDate';
 import { projectNumberFromRef } from '../../constants/projectNumber';
+import { IPickedValue, picked } from '../correspondenceTypes';
 import { extractYourRefNo } from '../fieldExtractor';
 import { IOcrPageResult, IOcrWord } from '../IPdfOcr';
 import { formatOcrTextWithStyles, joinOcrWords } from '../ocrSelection';
@@ -55,18 +56,23 @@ export function incomingProjectNumber(pages: IOcrPageResult[]): string {
 }
 
 export function extractIncomingOrganization(page?: IOcrPageResult): string {
+  return extractIncomingOrganizationLocated(page).value;
+}
+
+export function extractIncomingOrganizationLocated(page?: IOcrPageResult): IPickedValue {
   if (!page) {
-    return '';
+    return picked('', '');
   }
-  const fromAddress = organizationAboveAddressFloor(page);
-  if (fromAddress) {
+  const fromAddress = organizationAboveAddressFloorLocated(page);
+  if (fromAddress.value) {
     return fromAddress;
   }
   const fromWords = organizationFromLetterhead(page);
   if (fromWords) {
-    return fromWords;
+    return picked(fromWords, '信頭');
   }
-  return organizationFromLetterheadText(page.text || '');
+  const fromText = organizationFromLetterheadText(page.text || '');
+  return picked(fromText, fromText ? '信頭' : '');
 }
 
 export function extractIncomingIssueDate(pages: IOcrPageResult[]): string {
@@ -94,6 +100,10 @@ export function extractIncomingMemoReceiver(page?: IOcrPageResult): string {
 }
 
 export function extractIncomingSender(pages: IOcrPageResult[]): string {
+  return extractIncomingSenderLocated(pages).value;
+}
+
+export function extractIncomingSenderLocated(pages: IOcrPageResult[]): IPickedValue {
   const list = pages || [];
   for (let index = list.length - 1; index >= 0; index--) {
     if (!pageHasIncomingYoursClosing(list[index])) {
@@ -101,16 +111,16 @@ export function extractIncomingSender(pages: IOcrPageResult[]): string {
     }
     const name = signatureParenthesesOnPage(list[index]);
     if (name) {
-      return name;
+      return picked(name, '署名括號');
     }
   }
   for (let index = list.length - 1; index >= 0; index--) {
     const name = signatureParenthesesOnPage(list[index]);
     if (name) {
-      return name;
+      return picked(name, '署名括號');
     }
   }
-  return '';
+  return picked('', '');
 }
 
 function signatureParenthesesOnPage(page?: IOcrPageResult): string {
@@ -161,6 +171,10 @@ export function incomingSignatureParenName(value: string): string {
 }
 
 export function extractIncomingReceiver(pages?: IOcrPageResult[] | IOcrPageResult): string {
+  return extractIncomingReceiverLocated(pages).value;
+}
+
+export function extractIncomingReceiverLocated(pages?: IOcrPageResult[] | IOcrPageResult): IPickedValue {
   const list = !pages ? [] : Array.isArray(pages) ? pages : [pages];
   for (let index = list.length - 1; index >= 0; index--) {
     if (!pageHasIncomingYoursClosing(list[index])) {
@@ -168,24 +182,24 @@ export function extractIncomingReceiver(pages?: IOcrPageResult[] | IOcrPageResul
     }
     const value = receiverDirectlyBelowYours(list[index]);
     if (value) {
-      return value;
+      return picked(value, 'Yours faithfully 正下方');
     }
   }
   for (let index = list.length - 1; index >= 0; index--) {
     const value = receiverDirectlyBelowYours(list[index]);
     if (value) {
-      return value;
+      return picked(value, 'Yours faithfully 正下方');
     }
   }
   const firstPage = list[0];
   if (!firstPage) {
-    return '';
+    return picked('', '');
   }
   const fromAttn = extractIncomingAttn(firstPage);
   if (fromAttn) {
-    return fromAttn;
+    return picked(fromAttn, 'Attn');
   }
-  return firstAddressLineAboveDear(firstPage);
+  return picked(firstAddressLineAboveDear(firstPage), 'Dear 上方地址');
 }
 
 function receiverDirectlyBelowYours(page?: IOcrPageResult): string {
@@ -513,13 +527,13 @@ function firstAddressLineAboveDear(page: IOcrPageResult): string {
   return firstAddressLineAboveDearFromText(page.text || '');
 }
 
-function organizationAboveAddressFloor(page: IOcrPageResult): string {
+function organizationAboveAddressFloorLocated(page: IOcrPageResult): IPickedValue {
   const cluster = addresseeLinesAboveDear(page);
-  const fromCluster = organizationAboveFloorInLines(cluster);
-  if (fromCluster) {
+  const fromCluster = organizationAboveFloorInLinesLocated(cluster);
+  if (fromCluster.value) {
     return fromCluster;
   }
-  return organizationAboveFloorInLines(addresseeLinesAboveDearFromText(page.text || ''));
+  return organizationAboveFloorInLinesLocated(addresseeLinesAboveDearFromText(page.text || ''));
 }
 
 // Address sits on the left. A full OCR row can also pick up Our Ref / Date on the right, so
@@ -659,18 +673,18 @@ function addresseeLinesAboveDearFromText(text: string): string[] {
   return cluster.filter((line) => line.length > 0);
 }
 
-function organizationAboveFloorInLines(lines: string[]): string {
-  let anchorIndex = lastIncomingAnchorIndex(lines, isIncomingFloorLine);
+function organizationAboveFloorInLinesLocated(lines: string[]): IPickedValue {
+  const floorIndex = lastIncomingAnchorIndex(lines, isIncomingFloorLine);
+  const roadIndex = lastIncomingAnchorIndex(lines, isIncomingRoadLine);
+  const anchorIndex = floorIndex >= 0 ? floorIndex : roadIndex;
   if (anchorIndex < 0) {
-    anchorIndex = lastIncomingAnchorIndex(lines, isIncomingRoadLine);
+    return picked('', '');
   }
-  if (anchorIndex < 0) {
-    return '';
-  }
+  const source = floorIndex >= 0 ? 'xx/F 上一行' : 'Road 上一行';
   if (isIncomingFloorLine(lines[anchorIndex])) {
     const sameLine = textBeforeFloor(lines[anchorIndex]);
     if (sameLine) {
-      return sameLine;
+      return picked(sameLine, source);
     }
   }
   for (let previous = anchorIndex - 1; previous >= 0; previous--) {
@@ -678,9 +692,9 @@ function organizationAboveFloorInLines(lines: string[]): string {
     if (!candidate || isIncomingAddressAnchorLine(candidate) || matchAttnLine(candidate) || isIncomingDeliveryLine(candidate)) {
       continue;
     }
-    return cleanOrganization(candidate);
+    return picked(cleanOrganization(candidate), source);
   }
-  return '';
+  return picked('', '');
 }
 
 function lastIncomingAnchorIndex(lines: string[], match: (line: string) => boolean): number {

@@ -19,6 +19,7 @@ import * as strings from 'AiUploadWebPartStrings';
 import { locFormat } from '../loc/locFormat';
 import { PdfOcrService } from '../services/PdfOcrService';
 import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
+import { buildOcrFieldMarks, formatOcrTextWithDebugMarks, IOcrFieldMark } from '../services/ocrFieldMarks';
 import { formatOcrTextWithStyles } from '../services/ocrSelection';
 import PdfHighlightViewer from './PdfHighlightViewer';
 import { DEFAULT_FORM_FIELDS, isNameField, isReceiverField, isRegistrationNumberField, isRequiredField, isSenderField, missingRequiredFields } from '../constants/defaultFormFields';
@@ -79,6 +80,7 @@ interface IFormField {
   id: string;
   label: string;
   value: string;
+  debugSource?: string;
 }
 
 interface IAiUploadState {
@@ -100,6 +102,7 @@ interface IAiUploadState {
   uploadStatus: string | undefined;
   showRequiredErrors: boolean;
   showOcrStyles: boolean;
+  fieldDebugMarks: IOcrFieldMark[];
   history: IFieldHistory;
   historyFieldId: string | undefined;
 }
@@ -144,6 +147,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadStatus: undefined,
       showRequiredErrors: false,
       showOcrStyles: false,
+      fieldDebugMarks: [],
       history: loadFieldHistory(),
       historyFieldId: undefined
     };
@@ -202,6 +206,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadStatus,
       showRequiredErrors,
       showOcrStyles,
+      fieldDebugMarks,
       historyFieldId
     } = this.state;
     const busy = isProcessing || isUploading;
@@ -210,8 +215,15 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const markRequired = converted || showRequiredErrors;
     const percent = progress ? Math.max(0, Math.min(100, progress.percent)) / 100 : 0;
     const currentPreview = pages.filter((page) => page.pageNumber === currentPage)[0];
+    const pageFieldMarks = currentPreview
+      ? fieldDebugMarks.filter((mark) => mark.pageNumber === currentPreview.pageNumber)
+      : [];
     const ocrInspectText = currentPreview
-      ? (formatOcrTextWithStyles(currentPreview.words || []) || currentPreview.text || '')
+      ? (
+        showOcrStyles
+          ? (formatOcrTextWithDebugMarks(currentPreview.words || [], pageFieldMarks, true) || currentPreview.text || '')
+          : (formatOcrTextWithStyles(currentPreview.words || []) || currentPreview.text || '')
+      )
       : '';
     const hasFieldValues = fields.some((field) => field.value.length > 0);
     const destination = resolveUploadDestination(fields, {
@@ -541,6 +553,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                   page={currentPreview}
                   selectedIndexes={selectedWordIndexes}
                   showStyles={showOcrStyles}
+                  fieldMarks={pageFieldMarks}
                   onSelectText={this._onPdfSelectText}
                 />
               ) : (
@@ -562,7 +575,20 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                 </button>
               </div>
               <div className={styles.ocrTextBody}>
-                <p className={styles.hint}>{strings.ExtractedTextDescription}</p>
+                <p className={styles.hint}>
+                  {showOcrStyles
+                    ? (strings.DebugExtractedTextDescription || 'Debug: <b>/<u> are bold/underline. Field tags such as <Sender:署名括號> mark the OCR text used to fill each field.')
+                    : strings.ExtractedTextDescription}
+                </p>
+                {showOcrStyles && pageFieldMarks.length > 0 && (
+                  <div className={styles.fieldMarkLegend}>
+                    {pageFieldMarks.map((mark) => (
+                      <span key={mark.label + mark.pageNumber} className={styles.fieldMarkLegendItem} style={{ borderColor: mark.color, color: mark.color }}>
+                        {mark.source ? (mark.label + ' · ' + mark.source) : mark.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <TextField
                   multiline={true}
                   readOnly={true}
@@ -941,9 +967,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         if (field.id !== fieldId) {
           return field;
         }
+        const nextValue = this._normalizeFieldValue(field.label, value);
         return {
           ...field,
-          value: this._normalizeFieldValue(field.label, value)
+          value: nextValue,
+          debugSource: nextValue ? '手動輸入' : undefined
         };
       });
       return {
@@ -990,7 +1018,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             fields: result.leadingBl
               ? prev.fields.map((field) => (
                 isLeadingBlField(field.label)
-                  ? { ...field, value: canonicalLeadingBl(result.leadingBl) }
+                  ? { ...field, value: canonicalLeadingBl(result.leadingBl), debugSource: 'Notification Set-up' }
                   : field
               ))
               : prev.fields,
@@ -1006,7 +1034,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _applyPdfFileName = (fields: IFormField[], fileName?: string): IFormField[] => {
     const pdfName = fileName ? nameFromPdfFile(fileName) : '';
     const withName = fields.map((field) => (
-      isNameField(field.label) && pdfName ? { ...field, value: pdfName } : field
+      isNameField(field.label) && pdfName
+        ? { ...field, value: pdfName, debugSource: 'PDF 檔名' }
+        : field
     ));
     return this._syncRegistrationFromName(withName);
   };
@@ -1017,7 +1047,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       ? fields.map((field) => (
         isNameField(field.label) || isRegistrationNumberField(field.label)
           ? field
-          : { ...field, value: this._defaultFieldValue(field.label) }
+          : { ...field, value: this._defaultFieldValue(field.label), debugSource: undefined }
       ))
       : fields;
     return this._applyPdfFileName(next, fileName);
@@ -1027,7 +1057,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const nameField = fields.filter((field) => isNameField(field.label))[0];
     const nameValue = nameField ? nameField.value : '';
     return fields.map((field) => (
-      isRegistrationNumberField(field.label) ? { ...field, value: nameValue } : field
+      isRegistrationNumberField(field.label)
+        ? { ...field, value: nameValue, debugSource: nameValue ? '從 Name 複製' : undefined }
+        : field
     ));
   };
 
@@ -1113,11 +1145,17 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       return;
     }
     const value = fillTarget ? this._normalizeFieldValue(fillTarget.label, trimmed) : trimmed;
-    this.setState((prev) => ({
-      fields: this._syncRegistrationFromName(prev.fields.map((field) => field.id === targetId ? { ...field, value } : field)),
-      activeFieldId: targetId,
-      error: undefined
-    }));
+    this.setState((prev) => {
+      const fields = this._syncRegistrationFromName(prev.fields.map((field) => (
+        field.id === targetId ? { ...field, value, debugSource: 'PDF 選取' } : field
+      )));
+      return {
+        fields,
+        fieldDebugMarks: buildOcrFieldMarks(prev.pages, fields),
+        activeFieldId: targetId,
+        error: undefined
+      };
+    });
   };
 
   private _subProjectNumberOptions = (): IDropdownOption[] => {
@@ -1386,6 +1424,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         isProcessing: false,
         progress: undefined,
         fields: filled.fields,
+        fieldDebugMarks: buildOcrFieldMarks(result.pages, filled.fields),
         error: undefined,
         info: filled.info,
         warning: filled.warning
@@ -1448,12 +1487,13 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         if (isNameField(field.label)) {
           return field;
         }
-        const raw = incoming
+        const pickedField = incoming
           ? pickIncomingFieldValue(field.label, detected, aiValues[field.label] || '', keywordValues[field.label] || '')
           : pickOutgoingFieldValue(field.label, detected, aiValues[field.label] || '', keywordValues[field.label] || '');
         return {
           ...field,
-          value: this._normalizeFieldValue(field.label, raw)
+          value: this._normalizeFieldValue(field.label, pickedField.value),
+          debugSource: pickedField.source || undefined
         };
       }), this.state.file ? this.state.file.name : undefined);
     } catch {
@@ -1473,7 +1513,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         if (setup.leadingBl) {
           fields = fields.map((field) => (
             isLeadingBlField(field.label)
-              ? { ...field, value: this._normalizeFieldValue(field.label, setup.leadingBl) }
+              ? { ...field, value: this._normalizeFieldValue(field.label, setup.leadingBl), debugSource: 'Notification Set-up' }
               : field
           ));
         }
@@ -1546,7 +1586,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       pages: [],
       currentPage: 1,
       selectedWordIndexes: [],
-      fields: this.state.fields.map((field) => ({ ...field, value: this._defaultFieldValue(field.label) })),
+      fields: this.state.fields.map((field) => ({
+        ...field,
+        value: this._defaultFieldValue(field.label),
+        debugSource: undefined
+      })),
+      fieldDebugMarks: [],
       error: undefined,
       info: undefined,
       success: undefined,
