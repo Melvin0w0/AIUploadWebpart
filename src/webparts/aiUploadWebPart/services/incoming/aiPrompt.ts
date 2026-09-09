@@ -13,7 +13,7 @@ export function incomingSystemPrompt(): string {
     'Ref No is Our Ref / 本處檔號 / 檔號 of the originating party, not Your Ref.',
     'Project Number is the 8 digits immediately before the slash in Your Ref / 貴處檔號 / 來函編號; if there is no slash, the 8 digits immediately before the hyphen. Do not take Project Number from Our Ref.',
     'Do not invent values.'
-  ].join(' ') + '\nSubject:\n' + OUTGOING_SUBJECT_PROMPT;
+  ].join(' ') + '\nSubject:\n' + OUTGOING_SUBJECT_PROMPT + '\nIncoming extra: the Subject heading may start on the latter part of a line after Dear (right of Dear Sir, or after unstyled words on the left) and continue on the next line. Copy from that latter part through the following line. Do not copy the unstyled left-hand prefix.';
 }
 
 export function incomingLetterheadImageLabel(): string {
@@ -46,11 +46,11 @@ export function buildIncomingUserPrompt(
     ? [
       'Extract these fields from an incoming letter sent TO AECOM.',
       'Images: full first page, letterhead at the top, the body after the salutation, then the signature block if detected.',
-      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road. Not the whole row and not the letterhead. Receiver is the Attn value if present; if there is no Attn, it is the first left-hand address line above Dear. Ignore Our Ref / Date on the right. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider. Sender is the text inside the signature parentheses.'
+      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road. Not the whole row and not the letterhead. Receiver is the Attn value if present; if there is no Attn, it is the first left-hand address line above Dear. Ignore Our Ref / Date on the right. Subject: after Dear, copy bold+underline text even if it starts on the latter part of a line and continues on the next line. Do not copy the unstyled left prefix or a line that only sits above a table. Sender is the text inside the signature parentheses.'
     ]
     : [
       'Extract these fields from the OCR text of an incoming letter sent TO AECOM.',
-      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road, above Dear / 敬啟者. Not the whole row and not the letterhead. Ignore right-column Our Ref / Date. Sender is the text inside the signature parentheses. Receiver is the Attn value if present; if there is no Attn, the first left-hand address line above Dear. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider.'
+      'Organization is the LEFT-HAND line above xx/F, or if there is no floor line, the line above xxx Road, above Dear / 敬啟者. Not the whole row and not the letterhead. Ignore right-column Our Ref / Date. Sender is the text inside the signature parentheses. Receiver is the Attn value if present; if there is no Attn, the first left-hand address line above Dear. Subject: after Dear, copy bold+underline text even if it starts on the latter part of a line and continues on the next line. Do not copy a line that only sits above a table or divider.'
     ];
 
   const parts = [
@@ -86,7 +86,7 @@ export function buildIncomingUserPrompt(
   }
   parts.push('', OUTGOING_SUBJECT_PROMPT);
   if (subjectText && subjectText.trim()) {
-    parts.push('', 'Detected Subject from nearby lines after Dear that have both bold and underline. Use this text:', subjectText.trim());
+    parts.push('', 'Detected Subject from bold+underline text after Dear. It may start mid-line and continue on the next line. Use this text:', subjectText.trim());
   }
   if (refNo && refNo.trim()) {
     parts.push('', 'Detected Ref No from Our Ref: or standalone Ref:', refNo.trim());
@@ -111,7 +111,7 @@ function incomingFieldHelp(): string {
     'Organization: in the LEFT addressee address above Dear / 敬啟者, find a floor line such as 12/F or G/F and copy only the left-hand line immediately above it. If there is no xx/F, find a line containing xxx Road and copy the left-hand line immediately above that. Do not include Our Ref, Your Ref, Date, or other text on the right of that row. Do not use letterhead.',
     'Sender: copy ONLY the text inside the parentheses immediately below Yours faithfully / Yours sincerely / Yours truly / 署名, e.g. (Ben xXx. LXX) -> Ben xXx. LXX. Look on the page that contains that closing, which is often the last page, not the first page. Skip (signed). Do not copy CC / c.c. / 副本 / copy to names, whether they sit below the signature. Do not copy parentheses from Attn: near the top of page 1. Do not copy the job title under the parentheses. For a memo or email with no signature parentheses, use From:.',
     'Receiver: if Attn: / Attn : / Attention: is present, copy only the value after that label. If there is no Attn, copy the first left-hand address line above Dear / 敬啟者. Do not use the line below Yours faithfully. Ignore Our Ref / Date on the right of the same row.',
-    'Subject:\n' + OUTGOING_SUBJECT_PROMPT,
+    'Subject:\n' + OUTGOING_SUBJECT_PROMPT + '\nIncoming extra: the heading may start on the latter part of a line after Dear and continue on the next line. Copy from that latter part through the next line. Do not copy the unstyled left-hand prefix.',
     'File No: file number if shown separately from Ref No.',
     'Ref No: copy the value to the right of Our Ref: / 本處檔號 / 檔號. OCR may read Ref as Rref or Reef. Do not use Your Ref.',
     'Issue Date: the document date in dd/MM/yyyy, for example 03/09/2026. Accept 8 September 2026 and 2026年9月8日.',

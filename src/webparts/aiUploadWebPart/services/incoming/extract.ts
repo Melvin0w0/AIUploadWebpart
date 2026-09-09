@@ -5,6 +5,7 @@ import { IPickedValue, picked } from '../correspondenceTypes';
 import { extractYourRefNo } from '../fieldExtractor';
 import { IOcrPageResult, IOcrWord } from '../IPdfOcr';
 import { formatOcrTextWithStyles, joinOcrWords } from '../ocrSelection';
+import { SUBJECT } from '../ocrWordStyles';
 
 const DATE_LABELS: string[] = ['Date', '日期'];
 const MEMO_FROM_LABELS: string[] = ['From', '發件人', '寄件人'];
@@ -194,6 +195,125 @@ export function extractIncomingReceiverLocated(pages?: IOcrPageResult[] | IOcrPa
     return picked(fromAddress, 'Dear 上方地址第一行');
   }
   return picked('', '');
+}
+
+export function extractIncomingSubject(page?: IOcrPageResult): string {
+  if (!page) {
+    return '';
+  }
+  const fromRun = incomingSubjectFromPartialLine(page);
+  if (fromRun) {
+    return fromRun;
+  }
+  return '';
+}
+
+function incomingSubjectFromPartialLine(page: IOcrPageResult): string {
+  const lines = groupWordsIntoLines(page.words || []);
+  if (lines.length === 0) {
+    return '';
+  }
+  const dearIndex = findIncomingSalutationIndex(lines.map((line) => line.text));
+  const startIndex = dearIndex >= 0 ? dearIndex : 0;
+  const maxGap = Math.max(32, SUBJECT.maxLineGap);
+  for (let index = startIndex; index < lines.length; index++) {
+    const line = lines[index];
+    if (isIncomingYoursClosingPhrase(line.text) || isIncomingOtherClosingPhrase(line.text)) {
+      break;
+    }
+    if (index !== dearIndex && (isIncomingSalutation(line.text) || isIncomingDeliveryLine(line.text) || isIncomingMetaHeader(line.text))) {
+      continue;
+    }
+    const words = sortedIncomingLineWords(line);
+    const fromWord = firstIncomingSubjectWordIndex(words, index === dearIndex);
+    if (fromWord < 0) {
+      continue;
+    }
+    const firstPart = stripIncomingSubjectLabel(joinOcrWords(words.slice(fromWord)).replace(/\s+/g, ' ').trim());
+    if (!firstPart || isIncomingSubjectBodyStart(firstPart)) {
+      continue;
+    }
+    const parts: string[] = [firstPart];
+    let lastY1 = line.y1;
+    for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex++) {
+      const next = lines[nextIndex];
+      if (next.y0 - lastY1 > maxGap) {
+        break;
+      }
+      const nextText = stripIncomingSubjectLabel(stripIncomingMarkup(next.text).replace(/\s+/g, ' ').trim());
+      if (!nextText || isIncomingYoursClosingPhrase(nextText) || isIncomingOtherClosingPhrase(nextText) || isIncomingSalutation(nextText) || isIncomingSubjectBodyStart(nextText)) {
+        break;
+      }
+      if (nextIndex > index + 1 && !incomingLineHasBoldAndUnderline(next)) {
+        break;
+      }
+      parts.push(nextText);
+      lastY1 = next.y1;
+    }
+    const value = parts.join(' ').replace(/\s+/g, ' ').trim();
+    if (value.length >= 2 && value.length <= 280) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function sortedIncomingLineWords(line: ILine): IOcrWord[] {
+  return (line.words || []).slice().sort((left, right) => left.x0 - right.x0);
+}
+
+function firstIncomingSubjectWordIndex(words: IOcrWord[], isDearLine: boolean): number {
+  let start = 0;
+  if (isDearLine) {
+    while (start < words.length && isIncomingSalutationToken(words[start].text || '')) {
+      start++;
+    }
+  }
+  for (let index = start; index < words.length; index++) {
+    if (words[index].bold && words[index].underline) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function isIncomingSalutationToken(text: string): boolean {
+  const key = (text || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '');
+  if (!key) {
+    return true;
+  }
+  return key === 'dear' ||
+    key === 'sir' ||
+    key === 'sirs' ||
+    key === 'madam' ||
+    key === 'madams' ||
+    key === 'mesdames' ||
+    key === 'or' ||
+    key === 'and' ||
+    /^(敬啟者|敬启者|鈞鑒|台鑒)$/.test(text || '');
+}
+
+function incomingLineHasBoldAndUnderline(line: ILine): boolean {
+  const words = line.words || [];
+  for (let index = 0; index < words.length; index++) {
+    if (words[index].bold && words[index].underline) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isIncomingSubjectBodyStart(line: string): boolean {
+  const trimmed = stripIncomingMarkup(line);
+  return /^(i|we|please|thank|further|with reference|i refer)\b/i.test(trimmed) ||
+    /^(現|茲就|茲奉|敬悉|收悉)/.test(trimmed);
+}
+
+function stripIncomingSubjectLabel(line: string): string {
+  return (line || '')
+    .replace(/^(re|subject|ref|主旨|事由|關於|关于)\s*[:.-\uFF1A]\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function extractIncomingAttn(page: IOcrPageResult): string {

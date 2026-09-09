@@ -349,9 +349,6 @@ export function isGridRuleSpan(
   ) {
     return true;
   }
-  if (overshootLeft > 12 && overshootRight > 12) {
-    return true;
-  }
   return false;
 }
 
@@ -473,18 +470,13 @@ function underlineSpansUnderLine(
   }
 
   const minFragment = Math.max(18, lineWidth * 0.08);
-  const tightRow1 = Math.floor(line.y1 + Math.max(2, lineHeight * UNDERLINE.tightLookBelow));
   let bestRow = -1;
   let bestScore = 0;
-  let tightScore = 0;
   for (let row = row0; row <= row1; row++) {
     if (row < 0 || row >= height) {
       continue;
     }
     const score = underlineScoreOnRow(pixels, width, row, col0, col1, maxLum, minFragment);
-    if (row <= tightRow1 && score > tightScore) {
-      tightScore = score;
-    }
     if (score > bestScore) {
       bestScore = score;
       bestRow = row;
@@ -492,9 +484,6 @@ function underlineSpansUnderLine(
   }
   const minLine = Math.max(UNDERLINE.minLinePx, lineWidth * UNDERLINE.minLineCoverage);
   if (bestRow < 0 || bestScore < minLine) {
-    return [];
-  }
-  if (bestRow > tightRow1 && tightScore < minLine) {
     return [];
   }
 
@@ -531,9 +520,6 @@ function underlineScoreOnRow(
   const spans = darkSpansOnRow(pixels, width, row, maxLum, 8);
   let score = 0;
   for (let index = 0; index < spans.length; index++) {
-    if (isGridRuleSpan(spans[index], col0, col1, width)) {
-      continue;
-    }
     const left = Math.max(col0, spans[index].left);
     const right = Math.min(col1, spans[index].right);
     const overlap = right - left;

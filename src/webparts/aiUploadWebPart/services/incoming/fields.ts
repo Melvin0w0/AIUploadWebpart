@@ -13,6 +13,7 @@ import {
   extractIncomingOrganizationLocated,
   extractIncomingReceiverLocated,
   extractIncomingSenderLocated,
+  extractIncomingSubject,
   incomingProjectNumber,
   incomingSenderName,
   incomingSignatureParenName
@@ -31,7 +32,10 @@ export async function detectIncomingFields(pages: IOcrPageResult[]): Promise<IDe
   const organization = tryPicked(() => extractIncomingOrganizationLocated(firstPage));
   detected.organization = organization.value;
   detected.sources.organization = organization.source;
-  detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
+  detected.subjectText = tryText(() => extractIncomingSubject(firstPage));
+  if (!detected.subjectText) {
+    detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
+  }
   if (detected.subjectText) {
     detected.sources.subject = 'Dear 後粗體+底線';
   }
