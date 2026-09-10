@@ -7,6 +7,12 @@ import {
   sanitizeProjectNumber
 } from '../constants/projectNumber';
 import { INCOMING_FOLDER_NAME, OUTGOING_FOLDER_NAME, isIncomingName, isOutgoingName } from '../constants/incomingName';
+import {
+  canonicalUploadType,
+  confidentialFolderForUploadType,
+  UploadType,
+  UPLOAD_TYPE_NORMAL
+} from '../constants/uploadType';
 
 export interface INamedValue {
   label: string;
@@ -17,6 +23,7 @@ export interface IUploadDestinationConfig {
   tenantUrl: string;
   libraryName: string;
   folderPathTemplate: string;
+  uploadType?: UploadType | string;
 }
 
 export interface IResolvedUploadDestination {
@@ -57,10 +64,11 @@ export function resolveUploadDestination(
 
   const folderPath = collapsePath(replaceTokens(folderTemplate, values, extras, true));
   const nameValue = lookup(values, 'Name');
+  const uploadType = canonicalUploadType(config.uploadType || UPLOAD_TYPE_NORMAL);
   return {
     siteUrl: blSite ? blSite.siteUrl : '',
     libraryName,
-    folderPath: appendCorrespondenceFolder(folderPath, nameValue),
+    folderPath: appendCorrespondenceFolder(folderPath, nameValue, uploadType),
     leadingBl: blSite ? blSite.name : leadingBl,
     projectNumber: lookup(values, 'Project Number'),
     missingFields,
@@ -115,17 +123,23 @@ function lookup(values: { [label: string]: string }, name: string): string {
   return key ? values[key] : '';
 }
 
-function appendCorrespondenceFolder(folderPath: string, nameValue: string): string {
+function appendCorrespondenceFolder(folderPath: string, nameValue: string, uploadType: UploadType): string {
   if (!folderPath) {
     return folderPath;
   }
+  let next = folderPath;
   if (isOutgoingName(nameValue)) {
-    return appendFolderSegment(folderPath, OUTGOING_FOLDER_NAME);
+    next = appendFolderSegment(next, OUTGOING_FOLDER_NAME);
+  } else if (isIncomingName(nameValue)) {
+    next = appendFolderSegment(next, INCOMING_FOLDER_NAME);
+  } else {
+    return folderPath;
   }
-  if (isIncomingName(nameValue)) {
-    return appendFolderSegment(folderPath, INCOMING_FOLDER_NAME);
+  const confidentialFolder = confidentialFolderForUploadType(uploadType);
+  if (confidentialFolder) {
+    next = appendFolderSegment(next, confidentialFolder);
   }
-  return folderPath;
+  return next;
 }
 
 function appendFolderSegment(folderPath: string, segment: string): string {

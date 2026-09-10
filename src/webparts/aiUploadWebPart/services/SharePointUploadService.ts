@@ -223,11 +223,47 @@ export class SharePointUploadService {
     if (validated.attempted && validated.failed.length === 0) {
       return '';
     }
-    if (validated.attempted && validated.failed.length < Object.keys(payload).length) {
-      return `The file was uploaded. Some library fields could not be updated: ${validated.failed.join(', ')}.`;
+
+    // A single bad field (usually Issue Date format) must not drop the rest.
+    // Retry the fields that SharePoint accepted, then MERGE whatever is still missing.
+    if (validated.attempted && validated.failed.length > 0) {
+      const rest = omitKeys(payload, validated.failed);
+      if (Object.keys(rest).length > 0) {
+        const retry = await this._validateUpdateListItem(siteUrl, libraryTitle, item.Id, rest, digest);
+        if (retry.attempted && retry.failed.length === 0) {
+          const leftover = pickKeys(payload, validated.failed);
+          const leftoverFailed = await this._mergeLibraryFields(siteUrl, libraryTitle, item.Id, leftover, digest);
+          if (leftoverFailed.length === 0) {
+            return '';
+          }
+          return `The file was uploaded. Some library fields could not be updated: ${leftoverFailed.join(', ')}.`;
+        }
+      }
     }
 
-    const mergeUrl = `${siteUrl}/_api/web/lists/GetByTitle('${escapeOData(libraryTitle)}')/items(${item.Id})`;
+    const mergeFailed = await this._mergeLibraryFields(siteUrl, libraryTitle, item.Id, payload, digest);
+    if (mergeFailed.length === 0) {
+      return '';
+    }
+    if (mergeFailed.length < Object.keys(payload).length) {
+      return `The file was uploaded. Some library fields could not be updated: ${mergeFailed.join(', ')}.`;
+    }
+    const extra = validated.failed.length > 0 ? ` ${validated.failed.join(', ')}.` : '';
+    return `The file was uploaded, but library fields were not updated.${extra}`;
+  }
+
+  private async _mergeLibraryFields(
+    siteUrl: string,
+    libraryTitle: string,
+    itemId: number,
+    payload: { [name: string]: string | number | boolean },
+    digest: string
+  ): Promise<string[]> {
+    const keys = Object.keys(payload);
+    if (keys.length === 0) {
+      return [];
+    }
+    const mergeUrl = `${siteUrl}/_api/web/lists/GetByTitle('${escapeOData(libraryTitle)}')/items(${itemId})`;
     const response = await this._http.post(mergeUrl, SPHttpClient.configurations.v1, {
       headers: {
         Accept: 'application/json;odata=nometadata',
@@ -239,12 +275,10 @@ export class SharePointUploadService {
       body: JSON.stringify(payload)
     });
     if (response.ok || response.status === 204) {
-      return '';
+      return [];
     }
 
-    const details = await readSharePointError(response, 'Could not update library fields.');
     const failed: string[] = [];
-    const keys = Object.keys(payload);
     for (const key of keys) {
       const single: { [name: string]: string | number | boolean } = {};
       single[key] = payload[key];
@@ -262,14 +296,7 @@ export class SharePointUploadService {
         failed.push(key);
       }
     }
-    if (failed.length === 0) {
-      return '';
-    }
-    if (failed.length < keys.length) {
-      return `The file was uploaded. Some library fields could not be updated: ${failed.join(', ')}.`;
-    }
-    const extra = validated.failed.length > 0 ? ` ${validated.failed.join(', ')}.` : '';
-    return `The file was uploaded, but library fields were not updated. ${details}${extra}`;
+    return failed;
   }
 
   private async _validateUpdateListItem(
@@ -389,7 +416,57 @@ function toValidateFieldValue(value: string | number | boolean): string {
   if (typeof value === 'boolean') {
     return value ? '1' : '0';
   }
+  const dateText = toValidateDateText(value);
+  if (dateText) {
+    return dateText;
+  }
   return String(value);
+}
+
+function toValidateDateText(value: string | number | boolean): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (!iso) {
+    return '';
+  }
+  // ValidateUpdateListItem rejects ISO with milliseconds/Z, which was aborting the other fields.
+  return `${iso[1]}-${iso[2]}-${iso[3]} 00:00:00`;
+}
+
+function omitKeys(
+  payload: { [name: string]: string | number | boolean },
+  names: string[]
+): { [name: string]: string | number | boolean } {
+  const skip: { [name: string]: boolean } = {};
+  names.forEach((name) => {
+    skip[name.toLowerCase()] = true;
+  });
+  const next: { [name: string]: string | number | boolean } = {};
+  Object.keys(payload).forEach((key) => {
+    if (!skip[key.toLowerCase()]) {
+      next[key] = payload[key];
+    }
+  });
+  return next;
+}
+
+function pickKeys(
+  payload: { [name: string]: string | number | boolean },
+  names: string[]
+): { [name: string]: string | number | boolean } {
+  const keep: { [name: string]: boolean } = {};
+  names.forEach((name) => {
+    keep[name.toLowerCase()] = true;
+  });
+  const next: { [name: string]: string | number | boolean } = {};
+  Object.keys(payload).forEach((key) => {
+    if (keep[key.toLowerCase()]) {
+      next[key] = payload[key];
+    }
+  });
+  return next;
 }
 
 function escapeOData(value: string): string {

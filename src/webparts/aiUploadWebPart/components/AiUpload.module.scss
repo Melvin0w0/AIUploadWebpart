@@ -1054,6 +1054,11 @@
   border-top: none;
 }
 
+.uploadType {
+  max-width: 320px;
+  margin: 4px 0 2px;
+}
+
 .destination {
   word-break: break-all;
   color: var(--apple-secondary);
@@ -1314,6 +1319,10 @@
     gap: 14px;
     padding: 16px;
     margin-top: 20px;
+  }
+
+  .uploadType {
+    max-width: none;
   }
 
   .footerActions {

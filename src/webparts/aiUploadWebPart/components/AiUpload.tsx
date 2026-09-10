@@ -54,6 +54,12 @@ import {
   YES_NO_OPTIONS,
   YES_VALUE
 } from '../constants/yesNo';
+import {
+  canonicalUploadType,
+  UploadType,
+  UPLOAD_TYPE_NORMAL,
+  UPLOAD_TYPE_OPTIONS
+} from '../constants/uploadType';
 import { extractFieldValues } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
 import { detectIncomingFields, incomingAiHints, pickIncomingFieldValue } from '../services/incoming/fields';
@@ -107,6 +113,7 @@ interface IAiUploadState {
   fieldDebugMarks: IOcrFieldMark[];
   history: IFieldHistory;
   historyFieldId: string | undefined;
+  uploadType: UploadType;
 }
 
 export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadState> {
@@ -158,7 +165,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       devToolsOpen,
       fieldDebugMarks: [],
       history: loadFieldHistory(),
-      historyFieldId: undefined
+      historyFieldId: undefined,
+      uploadType: UPLOAD_TYPE_NORMAL
     };
   }
 
@@ -224,7 +232,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isRestyling,
       devToolsOpen,
       fieldDebugMarks,
-      historyFieldId
+      historyFieldId,
+      uploadType
     } = this.state;
     const busy = isProcessing || isUploading || isRestyling;
     const converted = pages.length > 0 && !isProcessing;
@@ -246,7 +255,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const destination = resolveUploadDestination(fields, {
       tenantUrl: this.props.tenantUrl,
       libraryName: this.props.libraryName,
-      folderPathTemplate: this.props.folderPathTemplate
+      folderPathTemplate: this.props.folderPathTemplate,
+      uploadType
     });
     const destinationUrl = buildUploadFolderUrl(destination);
     const destinationLabel = !destination.siteUrl
@@ -649,6 +659,14 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           <div className={styles.footer}>
             <div className={styles.uploadBar}>
               <p className={styles.hint}>{strings.UploadHint}</p>
+              <Dropdown
+                label={strings.UploadTypeLabel || 'Upload Type'}
+                selectedKey={uploadType}
+                options={this._uploadTypeOptions()}
+                onChange={(_event, option) => this._onUploadTypeChange(option ? String(option.key) : UPLOAD_TYPE_NORMAL)}
+                disabled={busy}
+                className={styles.uploadType}
+              />
               <div className={styles.destination}>
                 {strings.UploadDestinationLabel}:{' '}
                 {destinationUrl && destination.siteUrl ? (
@@ -1201,6 +1219,29 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
   };
 
+  private _uploadTypeOptions = (): IDropdownOption[] => {
+    return UPLOAD_TYPE_OPTIONS.map((option) => ({
+      key: option.key,
+      text: this._uploadTypeLabel(option.key)
+    }));
+  };
+
+  private _uploadTypeLabel = (uploadType: UploadType): string => {
+    if (uploadType === 'confidentialInvoice') {
+      return strings.UploadTypeConfidentialInvoice || 'Confidential Invoice';
+    }
+    if (uploadType === 'confidentialMisc') {
+      return strings.UploadTypeConfidentialMisc || 'Confidential MISC';
+    }
+    return strings.UploadTypeNormal || 'Normal';
+  };
+
+  private _onUploadTypeChange = (value: string): void => {
+    this.setState({
+      uploadType: canonicalUploadType(value)
+    });
+  };
+
   private _subProjectNumberOptions = (): IDropdownOption[] => {
     return SUB_PROJECT_NUMBER_OPTIONS.map((name) => ({
       key: name,
@@ -1394,7 +1435,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const destination = resolveUploadDestination(fields, {
       tenantUrl: this.props.tenantUrl,
       libraryName: this.props.libraryName,
-      folderPathTemplate: this.props.folderPathTemplate
+      folderPathTemplate: this.props.folderPathTemplate,
+      uploadType: this.state.uploadType
     });
 
     if (destination.missingFields.length > 0) {
@@ -1705,7 +1747,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadStatus: undefined,
       showRequiredErrors: false,
       isRestyling: false,
-      progress: undefined
+      progress: undefined,
+      uploadType: UPLOAD_TYPE_NORMAL
     });
   };
 

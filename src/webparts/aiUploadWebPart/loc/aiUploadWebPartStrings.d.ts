@@ -110,6 +110,10 @@ declare interface IAiUploadWebPartStrings {
   IncomingNoAutoFillHint: string;
   IncomingProjectNumberDescription: string;
   NotificationSetupThresholdHint: string;
+  UploadTypeLabel: string;
+  UploadTypeNormal: string;
+  UploadTypeConfidentialInvoice: string;
+  UploadTypeConfidentialMisc: string;
 }
 
 declare module 'AiUploadWebPartStrings' {

@@ -48,7 +48,7 @@ define([], function () {
     FolderPathTemplateLabel: 'Folder path template',
     FolderPathTemplateDescription: 'Folder under Project Documents. Default is {Project Number}.',
     UploadButton: 'Upload',
-    UploadHint: 'Upload always sends the original PDF you chose, not the OCR preview. Convert only fills fields. Name is taken from the PDF file name. Upload uses Leading BL to choose the business line site, then saves the PDF in that site\'s Project Documents folder named after Project Number. Name rules: 18 characters starting with I and a letter in position 14 go to InComing; 11 characters ending with a letter go to Outgoing. The site must have IsActive = Yes in Root URL Mapping List.',
+    UploadHint: 'Upload always sends the original PDF you chose, not the OCR preview. Convert only fills fields. Name is taken from the PDF file name. Upload uses Leading BL to choose the business line site, then saves the PDF in that site\'s Project Documents folder named after Project Number. Name rules: 18 characters starting with I and a letter in position 14 go to InComing; 11 characters ending with a letter go to Outgoing. Upload Type Normal stays in InComing or Outgoing; Confidential Invoice and Confidential MISC go into those folders\' Confidential_Invoice or Confidential_MISC subfolders. The site must have IsActive = Yes in Root URL Mapping List.',
     UploadDestinationLabel: 'Destination',
     UploadDestinationPending: 'Select Leading BL to choose the destination site',
     LeadingBlPlaceholder: 'Select a business line',
@@ -110,7 +110,11 @@ define([], function () {
     OutgoingLabel: 'Outgoing',
     IncomingNoAutoFillHint: 'Incoming files are not auto-filled. Enter fields manually or highlight the PDF.',
     IncomingProjectNumberDescription: '從 Your Ref 取 / 前面的 8 位數字。',
-    NotificationSetupThresholdHint: '無法從「Notification Set-up」讀取 Leading BL。請為 Project No 欄位建立索引（此清單超過 5,000 筆）。'
+    NotificationSetupThresholdHint: '無法從「Notification Set-up」讀取 Leading BL。請為 Project No 欄位建立索引（此清單超過 5,000 筆）。',
+    UploadTypeLabel: 'Upload Type',
+    UploadTypeNormal: 'Normal',
+    UploadTypeConfidentialInvoice: 'Confidential Invoice',
+    UploadTypeConfidentialMisc: 'Confidential MISC'
     // loc bundle
   };
 });
