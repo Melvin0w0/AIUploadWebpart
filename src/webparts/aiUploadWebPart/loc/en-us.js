@@ -114,7 +114,15 @@ define([], function () {
     UploadTypeLabel: 'Upload Type',
     UploadTypeNormal: 'Normal',
     UploadTypeConfidentialInvoice: 'Confidential Invoice',
-    UploadTypeConfidentialMisc: 'Confidential MISC'
+    UploadTypeConfidentialMisc: 'Confidential MISC',
+    LabelTypeLabel: 'Label Type',
+    LabelTypeNormal: 'Normal',
+    LabelTypeConfidential: 'Confidential',
+    LabelTypeInvoice: 'Invoice',
+    LabelTypeSite: 'Site',
+    UploadGeneratingLabel: 'Generating label page…',
+    UploadLabelFailed: 'Label page could not be added; the original PDF was uploaded.',
+    UploadBlankPageAdded: 'A blank label page was added at the end of the PDF.'
     // loc bundle
   };
 });

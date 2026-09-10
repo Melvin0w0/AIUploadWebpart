@@ -22,7 +22,7 @@ import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
 import { buildOcrFieldMarks, formatOcrTextWithDebugMarks, IOcrFieldMark } from '../services/ocrFieldMarks';
 import { formatOcrTextWithStyles, joinOcrWords, stripOcrStyleTags } from '../services/ocrSelection';
 import PdfHighlightViewer from './PdfHighlightViewer';
-import { DEFAULT_FORM_FIELDS, isNameField, isReceiverField, isRegistrationNumberField, isRequiredField, isSenderField, missingRequiredFields } from '../constants/defaultFormFields';
+import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
 import { CorrespondenceKind, correspondenceKindFromFileName, nameFromPdfFile } from '../constants/incomingName';
 import {
   canonicalLeadingBl,
@@ -49,6 +49,9 @@ import {
 } from '../constants/issueDate';
 import {
   canonicalYesNo,
+  isAttachmentField,
+  isCcToAecomField,
+  isScanField,
   isYesNoChoiceField,
   NO_VALUE,
   YES_NO_OPTIONS,
@@ -60,6 +63,12 @@ import {
   UPLOAD_TYPE_NORMAL,
   UPLOAD_TYPE_OPTIONS
 } from '../constants/uploadType';
+import {
+  canonicalLabelType,
+  LabelType,
+  LABEL_TYPE_NORMAL,
+  LABEL_TYPE_OPTIONS
+} from '../constants/labelType';
 import { extractFieldValues } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
 import { detectIncomingFields, incomingAiHints, pickIncomingFieldValue } from '../services/incoming/fields';
@@ -79,7 +88,9 @@ import {
   suggestionsFor,
   IFieldHistory
 } from '../services/fieldHistory';
-import { lookupLeadingBlFromNotificationSetup } from '../services/notificationSetup';
+import { lookupLabelStaffFromNotificationSetup, lookupLeadingBlFromNotificationSetup } from '../services/notificationSetup';
+import { generateLabelPagePng } from '../services/labelPage';
+import { appendLabelPageToPdf } from '../services/pdfLabelAppend';
 import { isDevToolsOpen, isSpfxServeDebug, subscribeDevToolsOpen } from '../services/spfxLocalDebug';
 
 interface IFormField {
@@ -114,6 +125,7 @@ interface IAiUploadState {
   history: IFieldHistory;
   historyFieldId: string | undefined;
   uploadType: UploadType;
+  labelType: LabelType;
 }
 
 export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadState> {
@@ -166,7 +178,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fieldDebugMarks: [],
       history: loadFieldHistory(),
       historyFieldId: undefined,
-      uploadType: UPLOAD_TYPE_NORMAL
+      uploadType: UPLOAD_TYPE_NORMAL,
+      labelType: LABEL_TYPE_NORMAL
     };
   }
 
@@ -233,7 +246,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       devToolsOpen,
       fieldDebugMarks,
       historyFieldId,
-      uploadType
+      uploadType,
+      labelType
     } = this.state;
     const busy = isProcessing || isUploading || isRestyling;
     const converted = pages.length > 0 && !isProcessing;
@@ -659,14 +673,24 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           <div className={styles.footer}>
             <div className={styles.uploadBar}>
               <p className={styles.hint}>{strings.UploadHint}</p>
-              <Dropdown
-                label={strings.UploadTypeLabel || 'Upload Type'}
-                selectedKey={uploadType}
-                options={this._uploadTypeOptions()}
-                onChange={(_event, option) => this._onUploadTypeChange(option ? String(option.key) : UPLOAD_TYPE_NORMAL)}
-                disabled={busy}
-                className={styles.uploadType}
-              />
+              <div className={styles.uploadSelectors}>
+                <Dropdown
+                  label={strings.UploadTypeLabel || 'Upload Type'}
+                  selectedKey={uploadType}
+                  options={this._uploadTypeOptions()}
+                  onChange={(_event, option) => this._onUploadTypeChange(option ? String(option.key) : UPLOAD_TYPE_NORMAL)}
+                  disabled={busy}
+                  className={styles.uploadType}
+                />
+                <Dropdown
+                  label={strings.LabelTypeLabel || 'Label Type'}
+                  selectedKey={labelType}
+                  options={this._labelTypeOptions()}
+                  onChange={(_event, option) => this._onLabelTypeChange(option ? String(option.key) : LABEL_TYPE_NORMAL)}
+                  disabled={busy}
+                  className={styles.labelType}
+                />
+              </div>
               <div className={styles.destination}>
                 {strings.UploadDestinationLabel}:{' '}
                 {destinationUrl && destination.siteUrl ? (
@@ -1242,6 +1266,47 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
   };
 
+  private _labelTypeOptions = (): IDropdownOption[] => {
+    return LABEL_TYPE_OPTIONS.map((option) => ({
+      key: option.key,
+      text: this._labelTypeLabel(option.key)
+    }));
+  };
+
+  private _labelTypeLabel = (labelType: LabelType): string => {
+    if (labelType === 'confidential') {
+      return strings.LabelTypeConfidential || 'Confidential';
+    }
+    if (labelType === 'invoice') {
+      return strings.LabelTypeInvoice || 'Invoice';
+    }
+    if (labelType === 'site') {
+      return strings.LabelTypeSite || 'Site';
+    }
+    return strings.LabelTypeNormal || 'Normal';
+  };
+
+  private _onLabelTypeChange = (value: string): void => {
+    this.setState({
+      labelType: canonicalLabelType(value)
+    });
+  };
+
+  private _namedValue = (fields: IFormField[], match: (label: string) => boolean): string => {
+    const field = fields.filter((item) => match(item.label))[0];
+    return field ? (field.value || '').trim() : '';
+  };
+
+  private _issueDateIso = (value: string): string => {
+    const date = parseIssueDate(value);
+    if (!date) {
+      return '';
+    }
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${date.getFullYear()}-${month < 10 ? '0' : ''}${month}-${day < 10 ? '0' : ''}${day}`;
+  };
+
   private _subProjectNumberOptions = (): IDropdownOption[] => {
     return SUB_PROJECT_NUMBER_OPTIONS.map((name) => ({
       key: name,
@@ -1471,6 +1536,46 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
 
     try {
+      let pdfBytes = this._originalPdfBytes && this._originalPdfBytes.byteLength > 0
+        ? this._originalPdfBytes
+        : new Uint8Array(await file.arrayBuffer());
+      let labelWarning = '';
+      try {
+        this.setState({ uploadStatus: strings.UploadGeneratingLabel || 'Generating label page…' });
+        const staff = await lookupLabelStaffFromNotificationSetup(
+          this.props.spHttpClient,
+          this.props.currentWebUrl,
+          this._namedValue(fields, isProjectNumberField)
+        );
+        const labelPng = await generateLabelPagePng(this.props.spHttpClient, {
+          labelType: this.state.labelType,
+          projectNumber: this._namedValue(fields, isProjectNumberField),
+          leadingBl: this._namedValue(fields, isLeadingBlField),
+          registrationNumber: this._namedValue(fields, isRegistrationNumberField) || this._namedValue(fields, isNameField),
+          organization: this._namedValue(fields, isOrganizationField),
+          sender: this._namedValue(fields, isSenderField),
+          receiver: this._namedValue(fields, isReceiverField),
+          subject: this._namedValue(fields, isSubjectField),
+          subProjectNumber: this._namedValue(fields, isSubProjectNumberField) || SUB_PROJECT_NONE,
+          issueDateIso: this._issueDateIso(this._namedValue(fields, isIssueDateField)),
+          refNo: this._namedValue(fields, isRefNoField),
+          hasAttachment: canonicalYesNo(this._namedValue(fields, isAttachmentField)) === YES_VALUE,
+          ccToAecom: canonicalYesNo(this._namedValue(fields, isCcToAecomField)) === YES_VALUE,
+          uploadType: this.state.uploadType,
+          staff,
+          hasScan: canonicalYesNo(this._namedValue(fields, isScanField)) === YES_VALUE,
+          siteUrls: [this.props.siteAbsoluteUrl, this.props.currentWebUrl].filter((url, index, list) =>
+            !!url && list.indexOf(url) === index
+          )
+        });
+        pdfBytes = await appendLabelPageToPdf(pdfBytes, await labelPng.arrayBuffer());
+      } catch (labelErr) {
+        const details = labelErr instanceof Error ? labelErr.message : '';
+        labelWarning = details
+          ? `${strings.UploadLabelFailed || 'Label page could not be added; the original PDF was uploaded.'} ${details}`
+          : (strings.UploadLabelFailed || 'Label page could not be added; the original PDF was uploaded.');
+      }
+
       const service = new SharePointUploadService(this.props.spHttpClient);
       const result = await service.uploadPdf(
         destination,
@@ -1481,15 +1586,18 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         },
         this.props.currentWebUrl,
         fields.map((field) => ({ label: field.label, value: field.value })),
-        this._originalPdfBytes
+        pdfBytes
       );
+      const scanNote = canonicalYesNo(this._namedValue(fields, isScanField)) === YES_VALUE
+        ? (strings.UploadBlankPageAdded || 'A blank label page was added at the end of the PDF.')
+        : '';
       this.setState({
         isUploading: false,
         uploadStatus: undefined,
-        success: locFormat(strings.UploadSucceeded, 'Uploaded {0}.', result.fileName),
+        success: locFormat(strings.UploadSucceeded, 'Uploaded {0}.', result.fileName) + (scanNote ? `\n${scanNote}` : ''),
         successUrl: result.fileUrl,
         successFolderUrl: result.folderUrl,
-        warning: result.metadataError || undefined,
+        warning: [labelWarning, result.metadataError].filter((item) => !!item).join('\n') || undefined,
         history: this._persistHistory(rememberFieldValues(this.state.history, fields))
       });
     } catch (err) {
@@ -1698,6 +1806,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _localizeUploadStatus = (status: string): string => {
+    if (status.indexOf('Generating label') === 0) {
+      return strings.UploadGeneratingLabel || 'Generating label page…';
+    }
     if (status.indexOf('Checking Root URL Mapping') === 0) {
       return strings.UploadCheckingMapping;
     }
@@ -1748,7 +1859,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       showRequiredErrors: false,
       isRestyling: false,
       progress: undefined,
-      uploadType: UPLOAD_TYPE_NORMAL
+      uploadType: UPLOAD_TYPE_NORMAL,
+      labelType: LABEL_TYPE_NORMAL
     });
   };
 

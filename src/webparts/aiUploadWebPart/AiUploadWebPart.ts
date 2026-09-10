@@ -37,6 +37,7 @@ export default class AiUploadWebPart extends BaseClientSideWebPart<IAiUploadWebP
         azureOpenAiApiVersion: this.properties.azureOpenAiApiVersion || '2024-08-01-preview',
         tenantUrl,
         currentWebUrl: this.context.pageContext.web.absoluteUrl,
+        siteAbsoluteUrl: this.context.pageContext.site.absoluteUrl,
         libraryName: this.properties.libraryName || 'Project Documents',
         folderPathTemplate: this._resolveFolderPathTemplate(),
         spHttpClient: this.context.spHttpClient

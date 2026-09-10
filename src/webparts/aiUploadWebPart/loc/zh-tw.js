@@ -114,7 +114,15 @@ define([], function () {
     UploadTypeLabel: 'Upload Type',
     UploadTypeNormal: 'Normal',
     UploadTypeConfidentialInvoice: 'Confidential Invoice',
-    UploadTypeConfidentialMisc: 'Confidential MISC'
+    UploadTypeConfidentialMisc: 'Confidential MISC',
+    LabelTypeLabel: 'Label Type',
+    LabelTypeNormal: 'Normal',
+    LabelTypeConfidential: 'Confidential',
+    LabelTypeInvoice: 'Invoice',
+    LabelTypeSite: 'Site',
+    UploadGeneratingLabel: '正在產生標籤頁…',
+    UploadLabelFailed: '無法加入標籤頁，已改上傳原始 PDF。',
+    UploadBlankPageAdded: '已在 PDF 末頁加入空白標籤頁。'
     // loc bundle
   };
 });

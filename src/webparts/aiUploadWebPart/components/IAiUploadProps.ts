@@ -9,6 +9,7 @@ export interface IAiUploadProps {
   azureOpenAiApiVersion: string;
   tenantUrl: string;
   currentWebUrl: string;
+  siteAbsoluteUrl: string;
   libraryName: string;
   folderPathTemplate: string;
   spHttpClient: SPHttpClient;

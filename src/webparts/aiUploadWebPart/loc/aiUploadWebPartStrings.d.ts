@@ -114,6 +114,14 @@ declare interface IAiUploadWebPartStrings {
   UploadTypeNormal: string;
   UploadTypeConfidentialInvoice: string;
   UploadTypeConfidentialMisc: string;
+  LabelTypeLabel: string;
+  LabelTypeNormal: string;
+  LabelTypeConfidential: string;
+  LabelTypeInvoice: string;
+  LabelTypeSite: string;
+  UploadGeneratingLabel: string;
+  UploadLabelFailed: string;
+  UploadBlankPageAdded: string;
 }
 
 declare module 'AiUploadWebPartStrings' {

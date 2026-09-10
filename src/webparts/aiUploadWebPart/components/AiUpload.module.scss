@@ -404,6 +404,7 @@
 .bannerText {
   flex: 1;
   min-width: 0;
+  white-space: pre-line;
 }
 
 .bannerDismiss {
@@ -1054,9 +1055,19 @@
   border-top: none;
 }
 
-.uploadType {
+.uploadSelectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.uploadType,
+.labelType {
   max-width: 320px;
   margin: 4px 0 2px;
+  flex: 1;
+  min-width: 200px;
 }
 
 .destination {
@@ -1322,6 +1333,10 @@
   }
 
   .uploadType {
+    max-width: none;
+  }
+
+  .labelType {
     max-width: none;
   }
 

@@ -38,6 +38,126 @@ const PROJECT_FIELD_FALLBACKS: string[] = [
 
 let cached: { siteUrl: string; listTitle: string; columns: IListColumns } | undefined;
 
+export interface ILabelStaff {
+  floor: string;
+  pdUser: string;
+  pmUser: string;
+  dcUser: string;
+  b1User: string;
+}
+
+export function emptyLabelStaff(): ILabelStaff {
+  return {
+    floor: '',
+    pdUser: '',
+    pmUser: '',
+    dcUser: '',
+    b1User: ''
+  };
+}
+
+export async function lookupLabelStaffFromNotificationSetup(
+  http: SPHttpClient,
+  siteUrl: string,
+  projectNumber: string
+): Promise<ILabelStaff> {
+  const empty = emptyLabelStaff();
+  const projectNo = sanitizeProjectNumber(projectNumber);
+  if (!projectNo || !siteUrl || !http) {
+    return empty;
+  }
+
+  try {
+    const resolved = await resolveList(http, siteUrl);
+    if (!resolved) {
+      return empty;
+    }
+    const candidates = projectNumberCandidates(projectNo);
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        const item = await queryMatchingItem(
+          http,
+          resolved.siteUrl,
+          resolved.listTitle,
+          resolved.columns,
+          candidates[i]
+        );
+        const id = itemId(item);
+        if (!id) {
+          continue;
+        }
+        return await readLabelStaff(http, resolved.siteUrl, resolved.listTitle, id);
+      } catch {
+        if (i === candidates.length - 1) {
+          return empty;
+        }
+      }
+    }
+  } catch {
+    return empty;
+  }
+
+  return empty;
+}
+
+async function readLabelStaff(
+  http: SPHttpClient,
+  siteUrl: string,
+  listTitle: string,
+  itemIdValue: number
+): Promise<ILabelStaff> {
+  const empty = emptyLabelStaff();
+  const expand = 'PD,PM,Doc_x0020_Controller,Backup_x0020_1';
+  const select = [
+    'Id',
+    'Floor',
+    'PD/Title',
+    'PM/Title',
+    'Doc_x0020_Controller/Title',
+    'Backup_x0020_1/Title'
+  ].join(',');
+  const url =
+    `${trimSlash(siteUrl)}/_api/web/lists/GetByTitle('${escapeOData(listTitle)}')` +
+    `/items(${itemIdValue})?$select=${select}&$expand=${expand}`;
+  try {
+    const response = await http.get(url, SPHttpClient.configurations.v1, {
+      headers: {
+        Accept: 'application/json;odata=nometadata'
+      }
+    });
+    if (!response.ok) {
+      return empty;
+    }
+    const item = await response.json() as { [key: string]: unknown };
+    return {
+      floor: stringifySharePointValue(item.Floor),
+      pdUser: lookupTitle(item.PD),
+      pmUser: lookupTitle(item.PM),
+      dcUser: lookupTitle(item.Doc_x0020_Controller),
+      b1User: lookupTitle(item.Backup_x0020_1)
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function lookupTitle(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') {
+    return stringifySharePointValue(raw);
+  }
+  const record = raw as { [key: string]: unknown };
+  return stringifySharePointValue(record.Title || record.Name);
+}
+
+function itemId(item: { [key: string]: unknown } | undefined): number {
+  if (!item) {
+    return 0;
+  }
+  const raw = item.Id !== undefined ? item.Id : item.ID;
+  const parsed = typeof raw === 'number' ? raw : parseInt(String(raw || ''), 10);
+  return parsed > 0 ? parsed : 0;
+}
+
 export async function lookupLeadingBlFromNotificationSetup(
   http: SPHttpClient,
   siteUrl: string,

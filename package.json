@@ -19,11 +19,13 @@
     "@microsoft/sp-office-ui-fabric-core": "1.22.2",
     "@microsoft/sp-property-pane": "1.22.2",
     "@microsoft/sp-webpart-base": "1.22.2",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
     "react": "17.0.1",
     "react-dom": "17.0.1",
     "tesseract.js": "^5.1.1",
-    "tslib": "2.3.1"
+    "tslib": "2.3.1",
+    "zxing-wasm": "^2.2.4"
   },
   "devDependencies": {
     "@microsoft/eslint-config-spfx": "1.22.2",
