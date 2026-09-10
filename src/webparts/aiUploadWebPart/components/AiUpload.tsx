@@ -682,14 +682,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                   disabled={busy}
                   className={styles.uploadType}
                 />
-                <Dropdown
-                  label={strings.LabelTypeLabel || 'Label Type'}
-                  selectedKey={labelType}
-                  options={this._labelTypeOptions()}
-                  onChange={(_event, option) => this._onLabelTypeChange(option ? String(option.key) : LABEL_TYPE_NORMAL)}
-                  disabled={busy}
-                  className={styles.labelType}
-                />
+                {documentKind === 'incoming' && (
+                  <Dropdown
+                    label={strings.LabelTypeLabel || 'Label Type'}
+                    selectedKey={labelType}
+                    options={this._labelTypeOptions()}
+                    onChange={(_event, option) => this._onLabelTypeChange(option ? String(option.key) : LABEL_TYPE_NORMAL)}
+                    disabled={busy}
+                    className={styles.labelType}
+                  />
+                )}
               </div>
               <div className={styles.destination}>
                 {strings.UploadDestinationLabel}:{' '}
@@ -1540,40 +1542,43 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         ? this._originalPdfBytes
         : new Uint8Array(await file.arrayBuffer());
       let labelWarning = '';
-      try {
-        this.setState({ uploadStatus: strings.UploadGeneratingLabel || 'Generating label page…' });
-        const staff = await lookupLabelStaffFromNotificationSetup(
-          this.props.spHttpClient,
-          this.props.currentWebUrl,
-          this._namedValue(fields, isProjectNumberField)
-        );
-        const labelPng = await generateLabelPagePng(this.props.spHttpClient, {
-          labelType: this.state.labelType,
-          projectNumber: this._namedValue(fields, isProjectNumberField),
-          leadingBl: this._namedValue(fields, isLeadingBlField),
-          registrationNumber: this._namedValue(fields, isRegistrationNumberField) || this._namedValue(fields, isNameField),
-          organization: this._namedValue(fields, isOrganizationField),
-          sender: this._namedValue(fields, isSenderField),
-          receiver: this._namedValue(fields, isReceiverField),
-          subject: this._namedValue(fields, isSubjectField),
-          subProjectNumber: this._namedValue(fields, isSubProjectNumberField) || SUB_PROJECT_NONE,
-          issueDateIso: this._issueDateIso(this._namedValue(fields, isIssueDateField)),
-          refNo: this._namedValue(fields, isRefNoField),
-          hasAttachment: canonicalYesNo(this._namedValue(fields, isAttachmentField)) === YES_VALUE,
-          ccToAecom: canonicalYesNo(this._namedValue(fields, isCcToAecomField)) === YES_VALUE,
-          uploadType: this.state.uploadType,
-          staff,
-          hasScan: canonicalYesNo(this._namedValue(fields, isScanField)) === YES_VALUE,
-          siteUrls: [this.props.siteAbsoluteUrl, this.props.currentWebUrl].filter((url, index, list) =>
-            !!url && list.indexOf(url) === index
-          )
-        });
-        pdfBytes = await appendLabelPageToPdf(pdfBytes, await labelPng.arrayBuffer());
-      } catch (labelErr) {
-        const details = labelErr instanceof Error ? labelErr.message : '';
-        labelWarning = details
-          ? `${strings.UploadLabelFailed || 'Label page could not be added; the original PDF was uploaded.'} ${details}`
-          : (strings.UploadLabelFailed || 'Label page could not be added; the original PDF was uploaded.');
+      const isIncoming = correspondenceKindFromFileName(file.name) === 'incoming';
+      if (isIncoming) {
+        try {
+          this.setState({ uploadStatus: strings.UploadGeneratingLabel || 'Generating label page…' });
+          const staff = await lookupLabelStaffFromNotificationSetup(
+            this.props.spHttpClient,
+            this.props.currentWebUrl,
+            this._namedValue(fields, isProjectNumberField)
+          );
+          const labelPng = await generateLabelPagePng(this.props.spHttpClient, {
+            labelType: this.state.labelType,
+            projectNumber: this._namedValue(fields, isProjectNumberField),
+            leadingBl: this._namedValue(fields, isLeadingBlField),
+            registrationNumber: this._namedValue(fields, isRegistrationNumberField) || this._namedValue(fields, isNameField),
+            organization: this._namedValue(fields, isOrganizationField),
+            sender: this._namedValue(fields, isSenderField),
+            receiver: this._namedValue(fields, isReceiverField),
+            subject: this._namedValue(fields, isSubjectField),
+            subProjectNumber: this._namedValue(fields, isSubProjectNumberField) || SUB_PROJECT_NONE,
+            issueDateIso: this._issueDateIso(this._namedValue(fields, isIssueDateField)),
+            refNo: this._namedValue(fields, isRefNoField),
+            hasAttachment: canonicalYesNo(this._namedValue(fields, isAttachmentField)) === YES_VALUE,
+            ccToAecom: canonicalYesNo(this._namedValue(fields, isCcToAecomField)) === YES_VALUE,
+            uploadType: this.state.uploadType,
+            staff,
+            hasScan: canonicalYesNo(this._namedValue(fields, isScanField)) === YES_VALUE,
+            siteUrls: [this.props.siteAbsoluteUrl, this.props.currentWebUrl].filter((url, index, list) =>
+              !!url && list.indexOf(url) === index
+            )
+          });
+          pdfBytes = await appendLabelPageToPdf(pdfBytes, await labelPng.arrayBuffer());
+        } catch (labelErr) {
+          const details = labelErr instanceof Error ? labelErr.message : '';
+          labelWarning = details
+            ? `${strings.UploadLabelFailed || 'Label page could not be added; the original PDF was uploaded.'} ${details}`
+            : (strings.UploadLabelFailed || 'Label page could not be added; the original PDF was uploaded.');
+        }
       }
 
       const service = new SharePointUploadService(this.props.spHttpClient);
@@ -1588,7 +1593,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         fields.map((field) => ({ label: field.label, value: field.value })),
         pdfBytes
       );
-      const scanNote = canonicalYesNo(this._namedValue(fields, isScanField)) === YES_VALUE
+      const scanNote = isIncoming && canonicalYesNo(this._namedValue(fields, isScanField)) === YES_VALUE
         ? (strings.UploadBlankPageAdded || 'A blank label page was added at the end of the PDF.')
         : '';
       this.setState({
