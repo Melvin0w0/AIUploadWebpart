@@ -11,6 +11,10 @@ export function joinOcrWords(words: IOcrWord[]): string {
   return joinSortedOcrWords(sortOcrWords(words), false);
 }
 
+export function stripOcrStyleTags(text: string): string {
+  return (text || '').replace(/<\/?[bu]>/gi, '');
+}
+
 export function formatOcrTextWithStyles(words: IOcrWord[]): string {
   const sorted = sortOcrWords(words);
   if (sorted.length === 0) {

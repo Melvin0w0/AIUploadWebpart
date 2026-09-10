@@ -30,7 +30,12 @@ export async function extractFieldsWithAi(
   }
 
   const clipped = text.length > 14000 ? text.substring(0, 14000) : text;
-  const images = await buildPageImages(hints && hints.page, hints && hints.signature, hints && hints.kind);
+  const images = await buildPageImages(
+    hints && hints.page,
+    hints && hints.signature,
+    hints && hints.kind,
+    hints && hints.closingPage
+  );
   if (!clipped && images.length === 0) {
     return {};
   }
@@ -155,7 +160,8 @@ function buildImagePromptParts(prompt: string, images: IChatImage[]): IChatPart[
 async function buildPageImages(
   page?: IOcrPageResult,
   signature?: ISignatureAnalysis,
-  kind?: CorrespondenceKind
+  kind?: CorrespondenceKind,
+  closingPage?: IOcrPageResult
 ): Promise<IChatImage[]> {
   const source = page && page.imageUrl ? page.imageUrl.trim() : '';
   if (!source) {
@@ -200,7 +206,8 @@ async function buildPageImages(
       }
     }
     const region = signature && signature.region;
-    if (region) {
+    const regionPage = signature && signature.regionPageNumber;
+    if (region && (!regionPage || !page || regionPage === page.pageNumber)) {
       const below = Math.max(110, Math.round(image.height * 0.12));
       const sx = Math.max(0, region.x0 - 12);
       const sy = Math.max(0, region.y0 - 8);
@@ -218,6 +225,26 @@ async function buildPageImages(
           url: crop,
           detail: 'high',
           label: kind === 'incoming' ? incomingClosingImageLabel() : outgoingClosingImageLabel()
+        });
+      }
+    }
+    if (kind === 'outgoing' && closingPage && closingPage.imageUrl) {
+      const closingImage = closingPage.pageNumber === (page && page.pageNumber) ? image : await loadImage(closingPage.imageUrl);
+      const top = Math.floor(closingImage.height * 0.55);
+      const closingCrop = encodeImageRegion(
+        closingImage,
+        0,
+        top,
+        closingImage.width,
+        closingImage.height - top,
+        1280,
+        0.75
+      );
+      if (closingCrop) {
+        images.push({
+          url: closingCrop,
+          detail: 'high',
+          label: outgoingClosingImageLabel()
         });
       }
     }

@@ -1,5 +1,5 @@
 import { IOcrPageResult, IOcrWord } from './IPdfOcr';
-import { joinOcrWords } from './ocrSelection';
+import { joinOcrWords, stripOcrStyleTags } from './ocrSelection';
 import { SUBJECT } from './ocrWordStyles';
 
 export interface ISignatureRegion {
@@ -11,15 +11,15 @@ export interface ISignatureRegion {
 
 export interface ISignatureAnalysis {
   region: ISignatureRegion | undefined;
+  regionPageNumber?: number;
   senderName: string;
   textBelow: string;
 }
 
 export async function analyzeSignature(page?: IOcrPageResult): Promise<ISignatureAnalysis> {
-  const fromClosing = extractNameBetweenClosingAndTitle(page);
   const empty: ISignatureAnalysis = {
     region: undefined,
-    senderName: fromClosing,
+    senderName: '',
     textBelow: ''
   };
   if (!page || !page.imageUrl || page.width <= 0 || page.height <= 0) {
@@ -28,24 +28,19 @@ export async function analyzeSignature(page?: IOcrPageResult): Promise<ISignatur
 
   try {
     const image = await loadImage(page.imageUrl);
-    const regions = findInkSignatures(image, page.words || []);
-    let chosen: ISignatureAnalysis = empty;
-    for (let index = 0; index < regions.length; index++) {
-      const region = regions[index];
-      const textBelow = joinOcrWords(wordsBelowSignature(page, region));
-      const senderName = firstPersonName(textBelow);
-      if (senderName) {
-        chosen = { region, textBelow, senderName };
-      } else if (!chosen.region) {
-        chosen = { region, textBelow, senderName: '' };
-      }
-    }
-    if (chosen.senderName) {
-      return chosen;
+    const closing = findLastClosingHit(page.words || []);
+    const regions = preferRightmostSignatures(
+      findInkSignatures(image, page.words || []),
+      image.width
+    );
+    const region = pickSignatureBesideClosing(regions, closing, page.width, page.height);
+    if (!region) {
+      return empty;
     }
     return {
-      ...chosen,
-      senderName: fromClosing
+      region,
+      textBelow: joinOcrWords(wordsAroundSignature(page, region)),
+      senderName: ''
     };
   } catch {
     return empty;
@@ -54,25 +49,55 @@ export async function analyzeSignature(page?: IOcrPageResult): Promise<ISignatur
 
 export async function analyzeDocumentSignature(pages?: IOcrPageResult[]): Promise<ISignatureAnalysis> {
   const list = pages || [];
-  const firstPage = list[0];
   const closingPage = list.length > 0 ? list[list.length - 1] : undefined;
   const empty: ISignatureAnalysis = {
     region: undefined,
     senderName: '',
     textBelow: ''
   };
-  let signature = await analyzeSignature(closingPage).catch(() => empty);
-  if (firstPage && closingPage && firstPage.pageNumber !== closingPage.pageNumber) {
-    signature = {
+  const signature = await analyzeSignature(closingPage).catch(() => empty);
+  if (closingPage && signature.region) {
+    return {
       ...signature,
-      region: undefined
+      regionPageNumber: closingPage.pageNumber
     };
   }
   return signature;
 }
 
 export function asPersonName(value: string): string {
-  return personNameFromLine(value);
+  const line = (value || '').replace(/\s+/g, ' ').trim();
+  if (!isUsableSenderName(line)) {
+    return '';
+  }
+  return personNameFromLine(line) || loosePersonName(line);
+}
+
+export function extractOutgoingSender(page?: IOcrPageResult, region?: ISignatureRegion): string {
+  if (!page) {
+    return '';
+  }
+  const fromFull = senderFromPage(page, undefined);
+  if (fromFull) {
+    return fromFull;
+  }
+  if (region) {
+    return senderFromPage(page, region);
+  }
+  return '';
+}
+
+export function extractOutgoingSenderFromPages(pages?: IOcrPageResult[], region?: ISignatureRegion, regionPageNumber?: number): string {
+  const list = pages || [];
+  for (let index = list.length - 1; index >= 0; index--) {
+    const page = list[index];
+    const pageRegion = region && (!regionPageNumber || page.pageNumber === regionPageNumber) ? region : undefined;
+    const name = extractOutgoingSender(page, pageRegion);
+    if (name) {
+      return name;
+    }
+  }
+  return '';
 }
 
 export function extractReceiverAboveDearSir(page?: IOcrPageResult): string {
@@ -564,7 +589,121 @@ function isDeliveryKindLine(line: string, kind: 'post' | 'hand'): boolean {
 
 function isDepartmentLine(line: string): boolean {
   const text = (line || '').replace(/\s+/g, ' ').trim();
-  return /\bdepartments?\b/i.test(text) || /(?:署|處)\s*$/.test(text);
+  if (!text) {
+    return false;
+  }
+  return /\bdepartments?\b/i.test(text) ||
+    /\bdept\.?\b/i.test(text) ||
+    /(?:署|處)\s*$/.test(text);
+}
+
+function isOrgishToken(token: string): boolean {
+  const key = (token || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!key) {
+    return false;
+  }
+  if (key === 'engineer' || key === 'engineers' || key === 'officer' || key === 'officers') {
+    return false;
+  }
+  return key === 'civil' ||
+    key === 'electrical' ||
+    key === 'mechanical' ||
+    key === 'geotechnical' ||
+    key === 'environmental' ||
+    key === 'structural' ||
+    key === 'highways' ||
+    key === 'highway' ||
+    key.indexOf('enginee') === 0 ||
+    key.indexOf('engmee') === 0 ||
+    key.indexOf('enqine') === 0 ||
+    key.indexOf('depart') === 0 ||
+    key === 'dept' ||
+    key === 'office' ||
+    key === 'offices' ||
+    key.indexOf('bureau') === 0 ||
+    key.indexOf('divis') === 0 ||
+    key.indexOf('drainag') === 0 ||
+    key.indexOf('authorit') === 0 ||
+    key.indexOf('corporat') === 0 ||
+    key.indexOf('govern') === 0 ||
+    key === 'ministry' ||
+    key === 'section' ||
+    key === 'branch' ||
+    key === 'committee' ||
+    key === 'commission' ||
+    key === 'buildings' ||
+    key === 'works';
+}
+
+function hasOrgOrDeptToken(line: string): boolean {
+  const text = (line || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return false;
+  }
+  if (/工程(署|處|部|拓展)?|路政|渠務|水務|建築署|環保/.test(text)) {
+    return true;
+  }
+  const tokens = normalizeKey(text).split(' ').filter((token) => token.length > 0);
+  for (let index = 0; index < tokens.length; index++) {
+    if (isOrgishToken(tokens[index])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isOrgUnitLine(line: string): boolean {
+  const text = (line || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return false;
+  }
+  if (isDepartmentLine(text) || hasOrgOrDeptToken(text)) {
+    return true;
+  }
+  const key = normalizeKey(text);
+  if (/\b(division|office|bureau|branch|section|authority|commission|committee|ministry|government|corporation)\b/.test(key)) {
+    return true;
+  }
+  if (/^(hong\s+kong|hksar)(\s|$)/.test(key) || (/\bhong\s+kong\b/.test(key) && key.split(' ').length <= 4)) {
+    return true;
+  }
+  if (/(?:部|局|科|組|所)\s*$/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function isCompanyOrFirmLine(line: string): boolean {
+  const text = (line || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return false;
+  }
+  const key = normalizeKey(text);
+  if (/\b(limited|ltd|inc|incorporated|company|corp|corporation|group|holdings|plc|partners?|llp)\b/.test(key)) {
+    return true;
+  }
+  if (/\basia\b/.test(key) && !hasHonorific(text)) {
+    return true;
+  }
+  if (/公司|集團|企業|有限/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function isNonSenderLine(line: string): boolean {
+  return isActingForLine(line) ||
+    isOrgUnitLine(line) ||
+    isCompanyOrFirmLine(line) ||
+    isIgnorableBelowClosing(line);
+}
+
+function isUsableSenderName(value: string): boolean {
+  const name = (value || '').replace(/\s+/g, ' ').trim();
+  if (!name || isNonSenderLine(name) || isJobTitleLine(name) || isNoiseLine(name) || hasOrgOrDeptToken(name)) {
+    return false;
+  }
+  return !!personNameFromLine(name) || !!loosePersonName(name);
 }
 
 function isDirectorLine(line: string): boolean {
@@ -1083,6 +1222,46 @@ function groupWordsIntoLines(words: IOcrWord[]): { text: string; x0: number; x1:
     }
     groups.push([word]);
   });
+  return mapWordGroupsToLines(groups);
+}
+
+function medianWordHeight(words: IOcrWord[]): number {
+  const heights = (words || [])
+    .map((word) => Math.max(1, word.y1 - word.y0))
+    .sort((left, right) => left - right);
+  if (heights.length === 0) {
+    return 16;
+  }
+  return heights[Math.floor(heights.length / 2)];
+}
+
+function groupWordsIntoTightLines(words: IOcrWord[]): { text: string; x0: number; x1: number; y0: number; y1: number; words: IOcrWord[] }[] {
+  const medianH = medianWordHeight(words);
+  const threshold = Math.max(6, Math.min(12, medianH * 0.4));
+  const sorted = words.slice().sort((left, right) => {
+    if (Math.abs(left.y0 - right.y0) > threshold) {
+      return left.y0 - right.y0;
+    }
+    return left.x0 - right.x0;
+  });
+  const groups: IOcrWord[][] = [];
+  sorted.forEach((word) => {
+    const last = groups[groups.length - 1];
+    if (!last) {
+      groups.push([word]);
+      return;
+    }
+    const lastY0 = last.reduce((sum, item) => sum + item.y0, 0) / last.length;
+    if (Math.abs(word.y0 - lastY0) <= threshold) {
+      last.push(word);
+      return;
+    }
+    groups.push([word]);
+  });
+  return mapWordGroupsToLines(groups);
+}
+
+function mapWordGroupsToLines(groups: IOcrWord[][]): { text: string; x0: number; x1: number; y0: number; y1: number; words: IOcrWord[] }[] {
   return groups.map((group) => {
     let x0 = group[0].x0;
     let x1 = group[0].x1;
@@ -1448,7 +1627,7 @@ function findInkSignatures(image: HTMLImageElement, words: IOcrWord[]): ISignatu
   }
   context.drawImage(image, 0, 0);
 
-  const x0 = Math.floor(image.width * 0.40);
+  const x0 = Math.floor(image.width * 0.08);
   const y0 = Math.floor(image.height * 0.40);
   const x1 = image.width;
   const y1 = Math.floor(image.height * 0.97);
@@ -1462,6 +1641,7 @@ function findInkSignatures(image: HTMLImageElement, words: IOcrWord[]): ISignatu
   canvas.width = 0;
   canvas.height = 0;
 
+  const maxPrintedH = Math.max(28, medianWordHeight(words) * 2.4);
   const ink: number[] = [];
   const printed: boolean[] = [];
   for (let row = 0; row < height; row++) {
@@ -1474,7 +1654,7 @@ function findInkSignatures(image: HTMLImageElement, words: IOcrWord[]): ISignatu
       }
     }
     ink.push(dark / width);
-    printed.push(rowHasPrintedText(y0 + row, words, x0, x1));
+    printed.push(rowHasPrintedText(y0 + row, words, x0, x1, maxPrintedH));
   }
 
   const smooth: number[] = ink.map((_, row) => {
@@ -1487,22 +1667,36 @@ function findInkSignatures(image: HTMLImageElement, words: IOcrWord[]): ISignatu
     return sum / (to - from + 1);
   });
 
+  let printedSum = 0;
+  let printedCount = 0;
+  for (let row = 0; row < height; row++) {
+    if (printed[row] && ink[row] > 0.008 && ink[row] < 0.07) {
+      printedSum += ink[row];
+      printedCount++;
+    }
+  }
+  const printedTypical = printedCount > 0 ? printedSum / printedCount : 0.022;
+  const isInkRow = (row: number): boolean => {
+    if (smooth[row] < 0.018) {
+      return false;
+    }
+    if (!printed[row]) {
+      return smooth[row] >= 0.028;
+    }
+    return smooth[row] >= Math.max(0.05, printedTypical + 0.035);
+  };
+
   const minHeight = Math.max(10, Math.round(image.height * 0.016));
-  const maxHeight = Math.max(minHeight + 1, Math.round(image.height * 0.14));
+  const maxHeight = Math.max(minHeight + 1, Math.round(image.height * 0.18));
   const footerStart = Math.floor(image.height * 0.975);
   const regions: ISignatureRegion[] = [];
 
   for (let start = 0; start < smooth.length; start++) {
-    if (printed[start] || smooth[start] < 0.028) {
+    if (!isInkRow(start)) {
       continue;
     }
     let end = start;
-    while (
-      end < smooth.length &&
-      end - start < maxHeight &&
-      !printed[end] &&
-      smooth[end] >= 0.018
-    ) {
+    while (end < smooth.length && end - start < maxHeight && isInkRow(end)) {
       end++;
     }
     const runHeight = end - start;
@@ -1510,25 +1704,126 @@ function findInkSignatures(image: HTMLImageElement, words: IOcrWord[]): ISignatu
       const top = y0 + start;
       const bottom = y0 + end;
       if (bottom < footerStart) {
-        regions.push({
-          x0,
-          y0: top,
-          x1,
-          y1: bottom
-        });
+        const bounds = inkHorizontalBounds(pixels, width, height, start, end);
+        const left = bounds ? bounds.left : 0;
+        const right = bounds ? bounds.right : width - 1;
+        if (right - left >= 8 && (right - left) < width * 0.78) {
+          regions.push({
+            x0: x0 + left,
+            y0: top,
+            x1: x0 + right + 1,
+            y1: bottom
+          });
+        }
       }
     }
     start = Math.max(start, end - 1);
   }
 
-  return regions;
+  return mergeSignatureRegions(regions, image.width, image.height);
 }
 
-function rowHasPrintedText(y: number, words: IOcrWord[], x0: number, x1: number): boolean {
+function preferRightmostSignatures(regions: ISignatureRegion[], pageWidth: number): ISignatureRegion[] {
+  if (regions.length === 0) {
+    return [];
+  }
+  const sorted = regions.slice().sort((left, right) => {
+    const rightCenter = (right.x0 + right.x1) / 2;
+    const leftCenter = (left.x0 + left.x1) / 2;
+    if (Math.abs(rightCenter - leftCenter) > pageWidth * 0.08) {
+      return rightCenter - leftCenter;
+    }
+    return left.y0 - right.y0;
+  });
+  return sorted;
+}
+
+function inkHorizontalBounds(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  rowStart: number,
+  rowEnd: number
+): { left: number; right: number } | undefined {
+  const runH = Math.max(1, Math.min(height, rowEnd) - rowStart);
+  if (runH < 1 || width < 8) {
+    return undefined;
+  }
+  const colScore: number[] = [];
+  for (let col = 0; col < width; col++) {
+    let dark = 0;
+    for (let row = rowStart; row < rowEnd && row < height; row++) {
+      const index = (row * width + col) * 4;
+      const lum = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];
+      if (lum < 135) {
+        dark++;
+      }
+    }
+    colScore.push(dark / runH);
+  }
+  const threshold = 0.045;
+  let left = 0;
+  while (left < width && colScore[left] < threshold) {
+    left++;
+  }
+  let right = width - 1;
+  while (right > left && colScore[right] < threshold) {
+    right--;
+  }
+  if (right - left < 8) {
+    return undefined;
+  }
+  const pad = Math.max(6, Math.round(width * 0.02));
+  return {
+    left: Math.max(0, left - pad),
+    right: Math.min(width - 1, right + pad)
+  };
+}
+
+function mergeSignatureRegions(regions: ISignatureRegion[], pageWidth: number, pageHeight: number): ISignatureRegion[] {
+  if (regions.length === 0) {
+    return [];
+  }
+  const sorted = regions.slice().sort((left, right) => left.y0 - right.y0);
+  const maxGap = Math.max(18, pageHeight * 0.028);
+  const maxXGap = Math.max(24, pageWidth * 0.08);
+  const merged: ISignatureRegion[] = [{
+    x0: sorted[0].x0,
+    y0: sorted[0].y0,
+    x1: sorted[0].x1,
+    y1: sorted[0].y1
+  }];
+  for (let index = 1; index < sorted.length; index++) {
+    const prev = merged[merged.length - 1];
+    const current = sorted[index];
+    const xGap = current.x0 > prev.x1
+      ? current.x0 - prev.x1
+      : (prev.x0 > current.x1 ? prev.x0 - current.x1 : 0);
+    if (current.y0 - prev.y1 <= maxGap && xGap <= maxXGap) {
+      prev.y1 = Math.max(prev.y1, current.y1);
+      prev.x0 = Math.min(prev.x0, current.x0);
+      prev.x1 = Math.max(prev.x1, current.x1);
+    } else {
+      merged.push({
+        x0: current.x0,
+        y0: current.y0,
+        x1: current.x1,
+        y1: current.y1
+      });
+    }
+  }
+  return merged;
+}
+
+function rowHasPrintedText(y: number, words: IOcrWord[], x0: number, x1: number, maxWordHeight?: number): boolean {
+  const maxH = maxWordHeight != null ? maxWordHeight : Number.POSITIVE_INFINITY;
   for (let index = 0; index < words.length; index++) {
     const word = words[index];
     const text = (word.text || '').trim();
     if (text.length < 2 || !/[A-Za-z\u3400-\u9FFF]{2,}/.test(text)) {
+      continue;
+    }
+    if (word.y1 - word.y0 > maxH) {
       continue;
     }
     const overlapsY = word.y0 <= y && word.y1 >= y;
@@ -1540,76 +1835,321 @@ function rowHasPrintedText(y: number, words: IOcrWord[], x0: number, x1: number)
   return false;
 }
 
-function wordsBelowSignature(page: IOcrPageResult, region: ISignatureRegion): IOcrWord[] {
-  const y0 = region.y1 - 2;
-  const y1 = Math.min(page.height, region.y1 + Math.max(96, page.height * 0.1));
+function wordsAroundSignature(page: IOcrPageResult, region: ISignatureRegion): IOcrWord[] {
+  const y0 = region.y0 - Math.max(8, page.height * 0.012);
+  const y1 = Math.min(page.height, region.y1 + Math.max(96, page.height * 0.12));
   const x0 = Math.max(0, region.x0 - page.width * 0.06);
   return (page.words || []).filter((word) => {
     const midX = (word.x0 + word.x1) / 2;
-    const midY = (word.y0 + word.y1) / 2;
-    return midX >= x0 && midY >= y0 && midY <= y1;
+    return midX >= x0 && word.y1 > y0 && word.y0 < y1;
   });
 }
 
-function extractNameBetweenClosingAndTitle(page?: IOcrPageResult): string {
-  if (!page) {
-    return '';
-  }
-  const fromWords = nameBetweenClosingAndTitleFromWords(page);
-  if (fromWords) {
-    return fromWords;
-  }
-  return nameBetweenClosingAndTitleFromText(page.text || '');
+function senderNameAroundRegion(page: IOcrPageResult, region: ISignatureRegion): string {
+  const lines = groupWordsIntoTightLines(wordsAroundSignature(page, region));
+  return pickNameAboveTitle(lines.map((line) => ({ text: line.text, y0: line.y0 })), region);
 }
 
-function nameBetweenClosingAndTitleFromWords(page: IOcrPageResult): string {
-  const closing = findClosingHit(page.words || []);
-  if (!closing) {
-    return '';
+function pickSignatureBesideClosing(
+  regions: ISignatureRegion[],
+  closing: { y0: number; y1: number } | undefined,
+  pageWidth: number,
+  pageHeight: number
+): ISignatureRegion | undefined {
+  if (regions.length === 0) {
+    return undefined;
   }
-  const below = (page.words || []).filter((word) => {
+  const nearClosing = closing
+    ? regions.filter((region) => region.y1 >= closing.y0 - pageHeight * 0.1)
+    : regions;
+  const pool = nearClosing.length > 0 ? nearClosing : regions;
+  return preferRightmostSignatures(pool, pageWidth)[0];
+}
+
+function signatureColumnRange(page: IOcrPageResult, region?: ISignatureRegion): { minX: number; maxX: number } {
+  if (!region) {
+    return { minX: 0, maxX: page.width };
+  }
+  const pad = Math.max(48, page.width * 0.12);
+  const center = (region.x0 + region.x1) / 2;
+  if (center >= page.width * 0.5) {
+    return {
+      minX: Math.min(page.width * 0.42, Math.max(0, region.x0 - pad)),
+      maxX: page.width
+    };
+  }
+  return {
+    minX: 0,
+    maxX: Math.max(page.width * 0.58, Math.min(page.width, region.x1 + pad))
+  };
+}
+
+function buildOutgoingSignatureBlock(
+  page: IOcrPageResult,
+  closing: { y0: number; y1: number },
+  region: ISignatureRegion | undefined,
+  ccTop: number
+): { text: string; y0: number; y1: number }[] {
+  const zoneY0 = closing.y0 - 8;
+  const zoneY1 = Math.min(page.height * 0.97, ccTop - 2);
+  const column = signatureColumnRange(page, region);
+  const words = (page.words || []).filter((word) => {
     const midX = (word.x0 + word.x1) / 2;
-    const midY = (word.y0 + word.y1) / 2;
-    return word.y0 >= closing.y1 - 10 &&
-      midY <= closing.y1 + Math.max(260, page.height * 0.38) &&
-      midX >= Math.max(0, closing.x0 - page.width * 0.4);
+    return word.y1 > zoneY0 && word.y0 < zoneY1 && midX >= column.minX && midX <= column.maxX;
   });
-  const lines = groupWordsIntoLines(below);
-  return pickNameAboveTitle(lines.map((line) => ({ text: line.text, y0: line.y0 })));
+  return groupWordsIntoTightLines(words)
+    .map((line) => ({
+      text: stripOcrStyleTags(line.text).replace(/\s+/g, ' ').trim(),
+      y0: line.y0,
+      y1: line.y1
+    }))
+    .filter((line) => {
+      if (!line.text || isClosingLine(line.text) || isOutgoingCcLine(line.text)) {
+        return false;
+      }
+      return true;
+    });
 }
 
-function nameBetweenClosingAndTitleFromText(text: string): string {
-  const lines = (text || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+function isAecomAsiaCompanyLine(line: string): boolean {
+  const key = normalizeKey(line);
+  if (!key) {
+    return false;
+  }
+  const hasAecom = /\baecom\b/.test(key) || /\baeco[mn]\b/.test(key);
+  const hasAsia = /\basia\b/.test(key);
+  const hasCompany = /\b(company|co|limited|ltd)\b/.test(key);
+  return hasAecom && hasAsia && hasCompany;
+}
+
+function pickSenderBelowAecomAsia(
+  block: { text: string; y0: number; y1: number }[],
+  region?: ISignatureRegion
+): string {
+  let aecomIndex = -1;
+  for (let index = 0; index < block.length; index++) {
+    if (isAecomAsiaCompanyLine(block[index].text)) {
+      aecomIndex = index;
+    }
+  }
+  if (aecomIndex >= 0) {
+    for (let index = aecomIndex + 1; index < block.length; index++) {
+      const text = block[index].text;
+      if (isJobTitleLine(text) || isOrgUnitLine(text) || isOutgoingCcLine(text) || isAecomAsiaCompanyLine(text)) {
+        break;
+      }
+      if (outgoingNameLineScore(text) > 0) {
+        return text;
+      }
+    }
+  }
+  return pickBestNameLineInSignatureBlock(block, region);
+}
+
+function pickBestNameLineInSignatureBlock(
+  block: { text: string; y0: number; y1: number }[],
+  region?: ISignatureRegion
+): string {
+  let titleIndex = -1;
+  for (let index = 0; index < block.length; index++) {
+    if (isJobTitleLine(block[index].text) || isOrgUnitLine(block[index].text)) {
+      titleIndex = index;
+      break;
+    }
+  }
+  const candidates = (titleIndex >= 0 ? block.slice(0, titleIndex) : block)
+    .map((line, index) => ({
+      text: line.text,
+      y0: line.y0,
+      score: outgoingNameLineScore(line.text),
+      index
+    }))
+    .filter((item) => item.score > 0);
+  if (candidates.length === 0) {
+    return '';
+  }
+  candidates.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    if (region) {
+      const leftDist = Math.abs(((left.y0) - region.y1));
+      const rightDist = Math.abs(((right.y0) - region.y1));
+      if (leftDist !== rightDist) {
+        return leftDist - rightDist;
+      }
+    }
+    return right.y0 - left.y0;
+  });
+  return candidates[0].text;
+}
+
+function outgoingNameLineScore(line: string): number {
+  const text = stripOcrStyleTags(line || '').replace(/\s+/g, ' ').trim();
+  if (!text ||
+    isActingForLine(text) ||
+    isIgnorableBelowClosing(text) ||
+    isCompanyOrFirmLine(text) ||
+    isOrgUnitLine(text) ||
+    isJobTitleLine(text) ||
+    hasOrgOrDeptToken(text) ||
+    isOutgoingCcLine(text) ||
+    isClosingLine(text)) {
+    return -1;
+  }
+  const person = personNameFromLine(text) || loosePersonName(text);
+  if (!person && !looksLikePersonName(text)) {
+    return -1;
+  }
+  let score = 1;
+  if (looksLikePersonName(text)) {
+    score += 6;
+  }
+  if (person) {
+    score += 3;
+  }
+  if (hasHonorific(text)) {
+    score += 2;
+  }
+  const tokens = text.replace(/^(ir|engr|eng|dr|mr|mrs|ms|prof)\.?\s+/i, '').split(/\s+/).filter((token) => token.length > 0);
+  if (tokens.length >= 2 && tokens.length <= 4) {
+    score += 2;
+  }
+  if (tokens.length === 3) {
+    score += 1;
+  }
+  return score;
+}
+
+function findOutgoingCcTop(page: IOcrPageResult, minY: number): number {
+  const lines = groupWordsIntoTightLines(page.words || []);
   for (let index = 0; index < lines.length; index++) {
-    if (!isClosingLine(lines[index])) {
+    if (lines[index].y0 < minY) {
       continue;
     }
-    const after = lines.slice(index + 1, index + 12).map((line, offset) => ({
-      text: line,
-      y0: offset
-    }));
-    return pickNameAboveTitle(after);
+    if (isOutgoingCcLine(lines[index].text)) {
+      return lines[index].y0;
+    }
+  }
+  return page.height;
+}
+
+function isOutgoingCcLine(line: string): boolean {
+  const text = stripOcrStyleTags(line || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return false;
+  }
+  const lower = text.toLowerCase();
+  const key = normalizeKey(text);
+  return /^(c\.?\s*c\.?|cc|copy\s+to|copied\s+to)\b/.test(lower) ||
+    /^(c c|cc)\b/.test(key) ||
+    /^(副本|抄送|副本送|副本抄送)\b/.test(text);
+}
+
+function senderFromPage(page: IOcrPageResult, region?: ISignatureRegion): string {
+  const closing = findLastClosingHit(page.words || []);
+  const closingBand = closing || {
+    y0: page.height * 0.62,
+    y1: page.height * 0.62
+  };
+  const ccTop = findOutgoingCcTop(page, closingBand.y1);
+  const block = buildOutgoingSenderLines(page, closingBand, region, ccTop);
+  return completeLineAbove(block);
+}
+
+function buildOutgoingSenderLines(
+  page: IOcrPageResult,
+  closing: { y0: number; y1: number },
+  region: ISignatureRegion | undefined,
+  ccTop: number
+): { text: string; y0: number }[] {
+  const zoneY0 = closing.y1 - 4;
+  const zoneY1 = Math.min(page.height * 0.97, ccTop - 2);
+  const column = signatureColumnRange(page, region);
+  const words = (page.words || []).filter((word) => {
+    const midX = (word.x0 + word.x1) / 2;
+    return word.y1 > zoneY0 && word.y0 < zoneY1 && midX >= column.minX && midX <= column.maxX;
+  });
+  return groupWordsIntoLines(words)
+    .map((line) => ({
+      text: stripOcrStyleTags(joinOcrWords(line.words || []) || line.text).replace(/\s+/g, ' ').trim(),
+      y0: line.y0
+    }))
+    .filter((line) => !!line.text);
+}
+
+function completeLineAbove(lines: { text: string; y0: number }[]): string {
+  const block: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const raw = (lines[index].text || '').replace(/\s+/g, ' ').trim();
+    if (isOutgoingCcLine(raw)) {
+      break;
+    }
+    if (raw) {
+      block.push(raw);
+    }
+  }
+  let anchor = -1;
+  for (let index = 0; index < block.length; index++) {
+    const raw = block[index];
+    if (isClosingLine(raw) || isIgnorableBelowClosing(raw)) {
+      continue;
+    }
+    if (isJobTitleLine(raw) || isOrgUnitLine(raw)) {
+      anchor = index;
+      break;
+    }
+  }
+  if (anchor < 0) {
+    return '';
+  }
+  for (let index = anchor - 1; index >= 0; index--) {
+    const raw = block[index];
+    if (!raw || isClosingLine(raw) || isIgnorableBelowClosing(raw) || isOutgoingCcLine(raw)) {
+      continue;
+    }
+    return raw;
   }
   return '';
 }
 
-function pickNameAboveTitle(lines: { text: string; y0: number }[]): string {
+function pickNameAboveTitle(lines: { text: string; y0: number }[], region?: ISignatureRegion): string {
   const found: { name: string; y0: number }[] = [];
   for (let index = 0; index < lines.length; index++) {
-    const raw = (lines[index].text || '').replace(/\s+/g, ' ').trim();
+    const raw = stripOcrStyleTags(lines[index].text || '').replace(/\s+/g, ' ').trim();
+    if (isOutgoingCcLine(raw)) {
+      break;
+    }
     if (!raw || isClosingLine(raw) || isActingForLine(raw) || isIgnorableBelowClosing(raw)) {
+      continue;
+    }
+    if (isOrgUnitLine(raw) || isCompanyOrFirmLine(raw)) {
+      const mixed = bestPersonNameWindow(raw);
+      if (isUsableSenderName(mixed)) {
+        found.push({ name: mixed, y0: lines[index].y0 });
+      }
+      if (found.length > 0) {
+        break;
+      }
       continue;
     }
     const cleaned = stripTrailingTitle(raw);
     if (!cleaned || isActingForLine(cleaned) || isIgnorableBelowClosing(cleaned)) {
       continue;
     }
+    if (isOrgUnitLine(cleaned) || isCompanyOrFirmLine(cleaned)) {
+      const mixed = bestPersonNameWindow(cleaned);
+      if (isUsableSenderName(mixed)) {
+        found.push({ name: mixed, y0: lines[index].y0 });
+      }
+      if (found.length > 0) {
+        break;
+      }
+      continue;
+    }
     if (isJobTitleLine(raw) || isJobTitleLine(cleaned)) {
-      const nameOnTitleLine = preferredNameFromLine(cleaned);
-      if (nameOnTitleLine) {
+      const nameOnTitleLine = preferredNameFromLine(cleaned) || bestPersonNameWindow(cleaned);
+      if (isUsableSenderName(nameOnTitleLine)) {
         found.push({ name: nameOnTitleLine, y0: lines[index].y0 });
       }
       if (found.length > 0) {
@@ -1619,7 +2159,9 @@ function pickNameAboveTitle(lines: { text: string; y0: number }[]): string {
     }
     const names = candidateNamesFromLine(cleaned);
     for (let nameIndex = 0; nameIndex < names.length; nameIndex++) {
-      found.push({ name: names[nameIndex], y0: lines[index].y0 });
+      if (isUsableSenderName(names[nameIndex])) {
+        found.push({ name: names[nameIndex], y0: lines[index].y0 });
+      }
     }
   }
 
@@ -1627,6 +2169,12 @@ function pickNameAboveTitle(lines: { text: string; y0: number }[]): string {
     return '';
   }
   found.sort((left, right) => left.y0 - right.y0);
+  if (region) {
+    const near = found.filter((item) => item.y0 >= region.y0 - 36 && item.y0 <= region.y1 + 96);
+    if (near.length > 0) {
+      return near[near.length - 1].name;
+    }
+  }
   return found[found.length - 1].name;
 }
 
@@ -1636,7 +2184,29 @@ function candidateNamesFromLine(line: string): string[] {
     return [primary];
   }
   const left = leftPersonName(line);
-  return left ? [left] : [];
+  if (left) {
+    return [left];
+  }
+  const windowName = bestPersonNameWindow(line);
+  return windowName ? [windowName] : [];
+}
+
+function bestPersonNameWindow(line: string): string {
+  const tokens = (line || '').replace(/,/g, ' ').split(/\s+/).filter((token) => token.length > 0);
+  let best = '';
+  for (let start = 0; start < tokens.length; start++) {
+    for (let len = 2; len <= 4 && start + len <= tokens.length; len++) {
+      const slice = tokens.slice(start, start + len).join(' ');
+      const name = personNameFromLine(slice) || loosePersonName(slice);
+      if (!isUsableSenderName(name)) {
+        continue;
+      }
+      if (name.split(/\s+/).length > best.split(/\s+/).filter((token) => token.length > 0).length) {
+        best = name;
+      }
+    }
+  }
+  return best;
 }
 
 function preferredNameFromLine(line: string): string {
@@ -1660,7 +2230,7 @@ function loosePersonName(line: string): string {
     .replace(/\s*[)\uFF09]$/, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!text || isJobTitleLine(text) || isNoiseLine(text) || isActingForLine(text)) {
+  if (!text || isJobTitleLine(text) || isNoiseLine(text) || isActingForLine(text) || isOrgUnitLine(text) || isCompanyOrFirmLine(text) || hasOrgOrDeptToken(text)) {
     return '';
   }
   if (/工程師|總監|經理|主任|專員|顧問|秘書|署長|處長/.test(text)) {
@@ -1672,7 +2242,7 @@ function loosePersonName(line: string): string {
   }
   const withoutTitle = text.replace(/^(ir|engr|eng|dr|mr|mrs|ms|prof)\.?\s+/i, '');
   const tokens = withoutTitle.replace(/,/g, ' ').split(/\s+/).filter((token) => token.length > 0);
-  if (tokens.length === 0 || tokens.length > 5) {
+  if (tokens.length < 2 || tokens.length > 5) {
     return '';
   }
   const ok = tokens.every((token) =>
@@ -1699,7 +2269,10 @@ function leftPersonName(line: string): string {
 
 function isActingForLine(line: string): boolean {
   const key = normalizeKey(line);
-  return /^for\b/.test(key) || /\bon behalf\b/.test(key);
+  return /^for\b/.test(key) ||
+    /\bon\s+behal[f]?f?\b/.test(key) ||
+    /\bbehaif\b/.test(key) ||
+    /\bbehalf\b/.test(key);
 }
 
 function isJobTitleLine(line: string): boolean {
@@ -1739,6 +2312,7 @@ function isIgnorableBelowClosing(line: string): boolean {
     isIgnorableParen(key) ||
     key === 'signed' ||
     /^for and on behalf/.test(key) ||
+    /^for and beha/.test(key) ||
     /^[-_.=]+$/.test(line);
 }
 
@@ -1747,9 +2321,10 @@ function isClosingLine(line: string): boolean {
     return true;
   }
   const key = normalizeKey(line);
-  return /(^|\s)yours\s+sincere/.test(' ' + key) ||
-    /(^|\s)yours\s+faithful/.test(' ' + key) ||
-    /(^|\s)yours\s+truly/.test(' ' + key);
+  return /(^|\s)yours?\s+sincer/.test(' ' + key) ||
+    /(^|\s)yours?\s+faith/.test(' ' + key) ||
+    /(^|\s)yours?\s+falth/.test(' ' + key) ||
+    /(^|\s)yours?\s+tru/.test(' ' + key);
 }
 
 function firstParenthesesContent(text: string): string {
@@ -1771,6 +2346,22 @@ function isIgnorableParen(value: string): boolean {
     key === 'sgd' ||
     key === 'chop' ||
     key === 'seal';
+}
+
+function findLastClosingHit(words: IOcrWord[]): { x0: number; y0: number; y1: number } | undefined {
+  const lines = groupWordsIntoLines(words);
+  let hit: { x0: number; y0: number; y1: number } | undefined;
+  for (let index = 0; index < lines.length; index++) {
+    const combined = lines[index + 1] ? (lines[index].text + ' ' + lines[index + 1].text) : lines[index].text;
+    if (isClosingLine(lines[index].text) || isClosingLine(combined)) {
+      hit = {
+        x0: lines[index].x0,
+        y0: lines[index].y0,
+        y1: lines[index].y1
+      };
+    }
+  }
+  return hit || findClosingHit(words);
 }
 
 function findClosingHit(words: IOcrWord[]): { x0: number; y0: number; y1: number } | undefined {
@@ -1813,12 +2404,19 @@ function firstPersonName(text: string): string {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   for (let index = 0; index < lines.length; index++) {
-    const name = personNameFromLine(lines[index]);
-    if (name) {
+    if (isNonSenderLine(lines[index]) || isJobTitleLine(lines[index])) {
+      const mixed = bestPersonNameWindow(lines[index]);
+      if (isUsableSenderName(mixed)) {
+        return mixed;
+      }
+      continue;
+    }
+    const name = personNameFromLine(lines[index]) || loosePersonName(lines[index]) || bestPersonNameWindow(lines[index]);
+    if (isUsableSenderName(name)) {
       return name;
     }
   }
-  return '';
+  return bestPersonNameWindow(text || '');
 }
 
 function personNameFromLine(line: string): string {
@@ -1826,7 +2424,7 @@ function personNameFromLine(line: string): string {
     .replace(/^[\s(]+signed[\s)]+$/i, '')
     .replace(/^[-_.=]+$/, '')
     .trim();
-  if (!cleaned || isJobTitleLine(cleaned) || isNoiseLine(cleaned) || !looksLikePersonName(cleaned)) {
+  if (!cleaned || isJobTitleLine(cleaned) || isNoiseLine(cleaned) || isOrgUnitLine(cleaned) || isCompanyOrFirmLine(cleaned) || !looksLikePersonName(cleaned)) {
     return '';
   }
   return cleaned.replace(/\s+/g, ' ').trim();
@@ -1859,7 +2457,7 @@ function hasHonorific(line: string): boolean {
 
 function looksLikePersonName(line: string): boolean {
   const trimmed = line.trim();
-  if (/工程師|總監|經理|主任|專員|顧問|秘書|署長|處長/.test(trimmed)) {
+  if (/工程師|總監|經理|主任|專員|顧問|秘書|署長|處長/.test(trimmed) || isOrgUnitLine(trimmed) || isCompanyOrFirmLine(trimmed) || hasOrgOrDeptToken(trimmed)) {
     return false;
   }
   const cjk = trimmed.match(/[\u3400-\u9FFF]/g);

@@ -80,6 +80,10 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
         }
       });
     });
+    const wordHeights = words
+      .map((word) => Math.max(1, word.y1 - word.y0))
+      .sort((left, right) => left - right);
+    const medianWordH = wordHeights.length > 0 ? wordHeights[Math.floor(wordHeights.length / 2)] : 16;
 
     return (
       <div className={styles.pdfViewer}>
@@ -118,6 +122,9 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                 const y = word.y0 * scale;
                 const width = Math.max(1, (word.x1 - word.x0) * scale);
                 const height = Math.max(1, (word.y1 - word.y0) * scale);
+                const inflated = !!fieldMark && (word.y1 - word.y0) > medianWordH * 2.4;
+                const markHeight = inflated ? Math.max(1, medianWordH * scale) : height;
+                const markY = inflated ? Math.max(0, (word.y1 - medianWordH) * scale) : y;
                 const isFieldStart = fieldMark && fieldMark.indexes[0] === index;
                 return (
                   <g key={`${word.x0}-${word.y0}-${index}`}>
@@ -133,9 +140,9 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                     {fieldMark && (
                       <rect
                         x={x}
-                        y={y}
+                        y={markY}
                         width={width}
-                        height={height}
+                        height={markHeight}
                         className={styles.wordFieldMark}
                         style={{ fill: fieldMark.color, fillOpacity: 0.22 }}
                       />
@@ -159,7 +166,7 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
                     {isFieldStart && (
                       <text
                         x={x}
-                        y={Math.max(10, y - 3)}
+                        y={Math.max(10, markY - 3)}
                         className={styles.wordFieldLabel}
                         fill={fieldMark.color}
                       >

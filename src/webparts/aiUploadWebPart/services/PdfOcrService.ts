@@ -14,7 +14,12 @@ function pageHasClosing(text: string): boolean {
   const key = ' ' + (text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
   return key.indexOf(' yours sincere') >= 0 ||
     key.indexOf(' yours faithful') >= 0 ||
-    key.indexOf(' yours truly') >= 0;
+    key.indexOf(' yours falth') >= 0 ||
+    key.indexOf(' yours truly') >= 0 ||
+    key.indexOf(' your sincere') >= 0 ||
+    key.indexOf(' your faithful') >= 0 ||
+    key.indexOf(' your falth') >= 0 ||
+    key.indexOf(' your truly') >= 0;
 }
 
 function ensurePdfJsWorker(): Promise<void> {

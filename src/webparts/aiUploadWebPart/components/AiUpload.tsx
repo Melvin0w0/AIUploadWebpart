@@ -20,7 +20,7 @@ import { locFormat } from '../loc/locFormat';
 import { PdfOcrService } from '../services/PdfOcrService';
 import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
 import { buildOcrFieldMarks, formatOcrTextWithDebugMarks, IOcrFieldMark } from '../services/ocrFieldMarks';
-import { formatOcrTextWithStyles } from '../services/ocrSelection';
+import { formatOcrTextWithStyles, joinOcrWords, stripOcrStyleTags } from '../services/ocrSelection';
 import PdfHighlightViewer from './PdfHighlightViewer';
 import { DEFAULT_FORM_FIELDS, isNameField, isReceiverField, isRegistrationNumberField, isRequiredField, isSenderField, missingRequiredFields } from '../constants/defaultFormFields';
 import { CorrespondenceKind, correspondenceKindFromFileName, nameFromPdfFile } from '../constants/incomingName';
@@ -239,7 +239,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       ? (
         showOcrStyles
           ? (formatOcrTextWithDebugMarks(currentPreview.words || [], pageFieldMarks, true) || currentPreview.text || '')
-          : (formatOcrTextWithStyles(currentPreview.words || []) || currentPreview.text || '')
+          : (joinOcrWords(currentPreview.words || []) || currentPreview.text || '')
       )
       : '';
     const hasFieldValues = fields.some((field) => field.value.length > 0);
@@ -1106,6 +1106,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _normalizeFieldValue = (label: string, value: string): string => {
+    value = stripOcrStyleTags(value).replace(/[ \t]+/g, ' ').trim();
     if (isLeadingBlField(label)) {
       return canonicalLeadingBl(value);
     }
@@ -1123,7 +1124,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       if (file && correspondenceKindFromFileName(file.name) === 'incoming') {
         return this._unwrapSenderIfFullyParenthesized(value);
       }
-      return this._stripParentheses(value);
+      return value;
     }
     if (isIssueDateField(label)) {
       return sanitizeIssueDate(value);

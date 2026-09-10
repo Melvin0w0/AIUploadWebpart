@@ -4,13 +4,21 @@ import { isProjectNumberField, projectNumberFromRef, sanitizeProjectNumber } fro
 import { IAiExtractionHints, IDetectedFields, IPickedValue, emptyDetectedFields, picked, tryText, tryTextAsync } from '../correspondenceTypes';
 import { extractOurRefNo, extractOurRefOnly } from '../fieldExtractor';
 import { IOcrPageResult } from '../IPdfOcr';
-import { analyzeDocumentSignature, asPersonName, extractOrganizationAboveAddressee, extractReceiverAboveDearSir, extractSubjectBelowDearSir, subjectAppearsInPage } from '../signatureSender';
+import { analyzeDocumentSignature, extractOrganizationAboveAddressee, extractOutgoingSenderFromPages, extractReceiverAboveDearSir, extractSubjectBelowDearSir, subjectAppearsInPage } from '../signatureSender';
 
 export async function detectOutgoingFields(pages: IOcrPageResult[]): Promise<IDetectedFields> {
   const list = pages || [];
   const firstPage = list[0];
+  const closingPage = list.length > 0 ? list[list.length - 1] : undefined;
+  const signature = await analyzeDocumentSignature(list);
+  const subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
+  const outgoingSender = tryText(() => extractOutgoingSenderFromPages(list, signature.region, signature.regionPageNumber));
   const detected = emptyDetectedFields(firstPage);
-  detected.signature = await analyzeDocumentSignature(list);
+  detected.closingPage = closingPage;
+  detected.signature = {
+    ...signature,
+    senderName: outgoingSender
+  };
   detected.receiverName = tryText(() => extractReceiverAboveDearSir(firstPage));
   if (detected.receiverName) {
     detected.sources.receiver = 'Attn / Dear 上方';
@@ -19,8 +27,8 @@ export async function detectOutgoingFields(pages: IOcrPageResult[]): Promise<IDe
   if (detected.organization) {
     detected.sources.organization = 'Department 行';
   }
-  detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
-  if (detected.subjectText) {
+  detected.subjectText = subjectText;
+  if (subjectText) {
     detected.sources.subject = 'Dear 後粗體+底線';
   }
   detected.refNo = tryText(() => extractOurRefNo(list));
@@ -31,8 +39,8 @@ export async function detectOutgoingFields(pages: IOcrPageResult[]): Promise<IDe
   if (detected.projectNumber) {
     detected.sources.projectNumber = 'Our Ref';
   }
-  if (detected.signature.senderName) {
-    detected.sources.sender = '簽署下方姓名';
+  if (outgoingSender) {
+    detected.sources.sender = '職稱上一行';
   }
   return detected;
 }
@@ -45,9 +53,9 @@ export function pickOutgoingFieldValue(
 ): IPickedValue {
   if (isSenderField(label)) {
     if (detected.signature.senderName) {
-      return picked(detected.signature.senderName, detected.sources.sender || '簽署下方姓名');
+      return picked(detected.signature.senderName, detected.sources.sender || '職稱上一行');
     }
-    return picked(asPersonName(aiValue || ''), 'AI');
+    return picked(firstAiLine(aiValue), 'AI');
   }
   if (isReceiverField(label)) {
     if (detected.receiverName) {
@@ -96,6 +104,7 @@ export function pickOutgoingFieldValue(
 export function outgoingAiHints(detected: IDetectedFields): IAiExtractionHints {
   return {
     page: detected.firstPage,
+    closingPage: detected.closingPage,
     signature: detected.signature,
     receiverName: detected.receiverName,
     subjectText: detected.subjectText,

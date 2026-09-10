@@ -19,7 +19,7 @@ export const OUTGOING_SUBJECT_PROMPT: string = [
 ].join('\n');
 
 export function outgoingSystemPrompt(): string {
-  return 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values. Organization is every full line containing Department that appears below Our Ref and above Dear. Sender is the printed person name immediately below the handwritten signature, not the job title. Receiver is the value after Attn: if present; if there is no Attn, it is the person name above xx/F, skipping Department or Director lines. Omit Mr., Ms., Mrs., Miss, and any parenthetical text. Subject:\n' + OUTGOING_SUBJECT_PROMPT + '\nRef No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref; if there is no slash, the 8 digits immediately before the hyphen. Do not invent values.';
+  return 'You extract metadata from AECOM project correspondence. Use OCR text and the first-page image. Reply with JSON only. Use empty strings when a value is not clearly present. Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values. Organization is every full line containing Department that appears below Our Ref and above Dear. Sender is the entire printed line immediately above the job title or Department under Yours faithfully; copy that full line, never the job title or Department itself. Receiver is the value after Attn: if present; if there is no Attn, it is the person name above xx/F, skipping Department or Director lines. Omit Mr., Ms., Mrs., Miss, and any parenthetical text. Subject:\n' + OUTGOING_SUBJECT_PROMPT + '\nRef No is the value to the right of Our Ref:, or if that is missing, the value to the right of a standalone Ref:. Project Number is the 8 digits immediately before the slash in Our Ref; if there is no slash, the 8 digits immediately before the hyphen. Do not invent values.';
 }
 
 export function outgoingBodyImageLabel(): string {
@@ -27,7 +27,7 @@ export function outgoingBodyImageLabel(): string {
 }
 
 export function outgoingClosingImageLabel(): string {
-  return 'Closing block. Sender is the printed person name immediately below the handwritten signature:';
+  return 'Closing block. Sender is the entire printed line immediately above the job title or Department. Copy that full line, not the title itself:';
 }
 
 export function buildOutgoingUserPrompt(
@@ -46,11 +46,11 @@ export function buildOutgoingUserPrompt(
     ? [
       'Extract these fields from the first page of a scanned document.',
       'Images: full first page, the addressee area for By Post / By Hand / Attn, the heading after Dear Sir, then the signature block if detected.',
-      'Organization is every full line containing Department that sits below Our Ref and above Dear. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director lines and keep going up). Omit Mr./Ms. and parenthetical text. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider. Sender is the printed name immediately below the signature.'
+      'Organization is every full line containing Department that sits below Our Ref and above Dear. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director lines and keep going up). Omit Mr./Ms. and parenthetical text. Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider. Sender is the printed line immediately above the job title or Department under Yours faithfully. Never use the job title or Department as Sender.'
     ]
     : [
       'Extract these fields from the OCR text of a document.',
-      'Organization is every full line containing Department that sits below Our Ref and above Dear. Sender is the person name below the signature. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director and keep going up). Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider.'
+      'Organization is every full line containing Department that sits below Our Ref and above Dear. Sender is the printed line immediately above the job title or Department under Yours faithfully. Receiver is Attn if present, otherwise the person name above xx/F (skip Department/Director and keep going up). Subject: after Dear Sir/Madam, copy the entire first line that has both <b> and <u> on the same words. Do not copy a line that only sits above a table or divider.'
     ];
 
   const parts = [
@@ -65,11 +65,11 @@ export function buildOutgoingUserPrompt(
     ocrText || '(none)'
   ];
   if (signature && signature.senderName) {
-    parts.push('', 'Detected Sender from the printed name below the signature:', signature.senderName);
+    parts.push('', 'Detected Sender from the entire printed line immediately above the job title / Department. Use this full line:', signature.senderName);
   } else if (signature && signature.textBelow) {
-    parts.push('', 'OCR immediately below the signature:', signature.textBelow);
+    parts.push('', 'OCR immediately below the signature. Sender is the entire line above the job title or Department:', signature.textBelow);
   } else {
-    parts.push('', 'Look below the handwritten signature for the printed person name. That is Sender.');
+    parts.push('', 'Look under Yours faithfully for the job title or Department line. Sender is the entire printed line immediately above that. Copy the full line. Do not use the job title or Department.');
   }
   if (receiverName && receiverName.trim()) {
     parts.push('', 'Detected Receiver:', receiverName.trim());
@@ -101,7 +101,7 @@ function outgoingFieldHelp(): string {
     'Project Number: first take the 8 digits immediately before the slash in Our Ref: / Our Ref :. For example Our Ref: 12345678/ABC -> 12345678. If there is no slash, take the 8 digits immediately before the hyphen. For example Our Ref: 12345678-ABC -> 12345678. Digits only. Do not use Your Ref.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
     'Organization: ABOVE the Dear line and BELOW Our Ref:, copy every full line that contains the word Department. If there are several such lines, join them with a space. If none, copy the entire line immediately above a floor line such as 12/F, and strip all punctuation and symbols. Do not use letterhead above Our Ref. Do not use lines after Dear.',
-    'Sender: copy the printed person name immediately below the handwritten signature. If two names appear under Yours faithfully, use the lower name that sits just above the job title. Do not copy Chief Engineer, Director, Manager, or similar titles. Skip (signed).',
+    'Sender: copy the ENTIRE printed line immediately above the job title or Department under Yours faithfully / Yours sincerely. Keep the full line as printed. Do not shorten it to a name. Do not copy the job title or Department line itself.',
     'Receiver: if Attn: / Attn : / Attention: is present, copy only the value after that label. If there is no Attn, find a floor line such as 12/F and copy the person name above it. If the line above 12/F is a Department or Director line, keep going up until the person name, which usually starts with Mr / Ms. Do not include Mr., Ms., Mrs., Miss, Dr., or Ir. Delete any parentheses and the text inside them. Do not copy Department lines.',
     'Subject:\n' + OUTGOING_SUBJECT_PROMPT,
     'File No: file number',

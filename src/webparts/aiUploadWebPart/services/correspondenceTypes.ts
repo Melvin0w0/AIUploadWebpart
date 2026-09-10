@@ -9,6 +9,7 @@ export interface IPickedValue {
 
 export interface IDetectedFields {
   firstPage?: IOcrPageResult;
+  closingPage?: IOcrPageResult;
   signature: ISignatureAnalysis;
   receiverName: string;
   subjectText: string;
@@ -24,6 +25,7 @@ export interface IDetectedFields {
 
 export interface IAiExtractionHints {
   page?: IOcrPageResult;
+  closingPage?: IOcrPageResult;
   signature?: ISignatureAnalysis;
   receiverName?: string;
   subjectText?: string;
