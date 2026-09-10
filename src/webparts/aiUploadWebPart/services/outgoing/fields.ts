@@ -5,6 +5,7 @@ import { IAiExtractionHints, IDetectedFields, IPickedValue, emptyDetectedFields,
 import { extractOurRefNo, extractOurRefOnly } from '../fieldExtractor';
 import { IOcrPageResult } from '../IPdfOcr';
 import { analyzeDocumentSignature, extractOrganizationAboveAddressee, extractOutgoingSenderFromPages, extractReceiverAboveDearSir, extractSubjectBelowDearSir, subjectAppearsInPage } from '../signatureSender';
+import { trimOutgoingRefNoAtWatermark } from '../watermarkRemoval';
 
 export async function detectOutgoingFields(pages: IOcrPageResult[]): Promise<IDetectedFields> {
   const list = pages || [];
@@ -33,6 +34,7 @@ export async function detectOutgoingFields(pages: IOcrPageResult[]): Promise<IDe
   }
   detected.refNo = tryText(() => extractOurRefNo(list));
   if (detected.refNo) {
+    detected.refNo = await trimOutgoingRefNoAtWatermark(list, detected.refNo);
     detected.sources.refNo = 'Our Ref';
   }
   detected.projectNumber = tryText(() => projectNumberFromRef(extractOurRefOnly(list)));
