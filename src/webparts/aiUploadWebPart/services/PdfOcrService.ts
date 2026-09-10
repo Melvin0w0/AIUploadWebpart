@@ -2,7 +2,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import Tesseract from 'tesseract.js';
 import pdfWorkerAsset from '../assets/pdf.worker.min.jpg';
-import { IOcrPageResult, IOcrProgress, IOcrResult } from './IPdfOcr';
+import { IOcrPageResult, IOcrProgress, IOcrResult, IOcrStyleSpan, IOcrWord } from './IPdfOcr';
 import { annotateOcrWordStyles } from './ocrWordStyles';
 
 const MAX_RENDER_WIDTH = 1600;
@@ -100,10 +100,11 @@ export class PdfOcrService {
             x1: word.bbox.x1,
             y1: word.bbox.y1
           }));
+        const styleSpans: IOcrStyleSpan[] = [];
         try {
           const styleContext = canvas.getContext('2d', { willReadFrequently: true });
           if (styleContext) {
-            annotateOcrWordStyles(words, styleContext.getImageData(0, 0, canvas.width, canvas.height));
+            annotateOcrWordStyles(words, styleContext.getImageData(0, 0, canvas.width, canvas.height), styleSpans);
           }
         } catch {
           // Keep plain OCR words if the page image cannot be sampled.
@@ -115,7 +116,8 @@ export class PdfOcrService {
           imageUrl,
           width: canvas.width,
           height: canvas.height,
-          words
+          words,
+          styleSpans
         };
         pages.push(pageResult);
         if (onPage) {
@@ -143,6 +145,50 @@ export class PdfOcrService {
       };
     } finally {
       await worker.terminate();
+    }
+  }
+
+  public static async restylePage(
+    source: File | Uint8Array,
+    pageNumber: number,
+    words: IOcrWord[]
+  ): Promise<{ words: IOcrWord[]; styleSpans: IOcrStyleSpan[] }> {
+    await ensurePdfJsWorker();
+    const data = source instanceof Uint8Array
+      ? source.slice()
+      : new Uint8Array(await source.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({
+      data
+    }).promise;
+    let canvas: HTMLCanvasElement | undefined;
+    try {
+      canvas = await PdfOcrService._renderPage(pdf, pageNumber);
+      const resetWords = words.map((word) => ({
+        text: word.text,
+        x0: word.x0,
+        y0: word.y0,
+        x1: word.x1,
+        y1: word.y1
+      }));
+      const styleSpans: IOcrStyleSpan[] = [];
+      const styleContext = canvas.getContext('2d', { willReadFrequently: true });
+      if (styleContext) {
+        annotateOcrWordStyles(
+          resetWords,
+          styleContext.getImageData(0, 0, canvas.width, canvas.height),
+          styleSpans
+        );
+      }
+      return {
+        words: resetWords,
+        styleSpans
+      };
+    } finally {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+      await pdf.destroy();
     }
   }
 

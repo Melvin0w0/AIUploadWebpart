@@ -101,6 +101,16 @@ export default class PdfHighlightViewer extends React.Component<IPdfHighlightVie
               width={displayWidth}
               height={displayHeight}
             >
+              {showStyles && (page.styleSpans || []).map((span, spanIndex) => (
+                <line
+                  key={`${span.kind}-${span.x0}-${span.y}-${spanIndex}`}
+                  x1={span.x0 * scale}
+                  x2={span.x1 * scale}
+                  y1={span.y * scale}
+                  y2={span.y * scale}
+                  className={span.kind === 'separator' ? styles.styleSeparator : styles.styleUnderlineSpan}
+                />
+              ))}
               {words.map((word, index) => {
                 const isSelected = highlightIndexes.indexOf(index) >= 0;
                 const fieldMark = fieldByIndex[index];

@@ -15,6 +15,15 @@ export interface IOcrWord {
   underline?: boolean;
 }
 
+export type OcrStyleSpanKind = 'underline' | 'separator';
+
+export interface IOcrStyleSpan {
+  kind: OcrStyleSpanKind;
+  x0: number;
+  x1: number;
+  y: number;
+}
+
 export interface IOcrPageResult {
   pageNumber: number;
   text: string;
@@ -22,6 +31,7 @@ export interface IOcrPageResult {
   width: number;
   height: number;
   words: IOcrWord[];
+  styleSpans?: IOcrStyleSpan[];
 }
 
 export interface IOcrResult {

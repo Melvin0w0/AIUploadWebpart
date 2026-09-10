@@ -102,6 +102,7 @@ interface IAiUploadState {
   uploadStatus: string | undefined;
   showRequiredErrors: boolean;
   showOcrStyles: boolean;
+  isRestyling: boolean;
   devToolsOpen: boolean;
   fieldDebugMarks: IOcrFieldMark[];
   history: IFieldHistory;
@@ -120,6 +121,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _leadingBlLookupSeq: number = 0;
   private _leadingBlLookupTimer: number | undefined;
   private _stopDevToolsWatch: (() => void) | undefined;
+  private _restyleSeq: number;
 
   public constructor(props: IAiUploadProps) {
     super(props);
@@ -130,6 +132,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._leadingBlLookupSeq = 0;
     this._leadingBlLookupTimer = undefined;
     this._stopDevToolsWatch = undefined;
+    this._restyleSeq = 0;
     const fields = this._fieldsFromConfig(props.formFields);
     const devToolsOpen = isDevToolsOpen();
     this.state = {
@@ -151,6 +154,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadStatus: undefined,
       showRequiredErrors: false,
       showOcrStyles: false,
+      isRestyling: false,
       devToolsOpen,
       fieldDebugMarks: [],
       history: loadFieldHistory(),
@@ -188,6 +192,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       window.clearTimeout(this._leadingBlLookupTimer);
     }
     this._leadingBlLookupSeq = this._leadingBlLookupSeq + 1;
+    this._restyleSeq = this._restyleSeq + 1;
     this._revokePageUrls(this.state.pages);
     if (this._stopDevToolsWatch) {
       this._stopDevToolsWatch();
@@ -216,11 +221,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadStatus,
       showRequiredErrors,
       showOcrStyles,
+      isRestyling,
       devToolsOpen,
       fieldDebugMarks,
       historyFieldId
     } = this.state;
-    const busy = isProcessing || isUploading;
+    const busy = isProcessing || isUploading || isRestyling;
     const converted = pages.length > 0 && !isProcessing;
     const requiredMissing = missingRequiredFields(fields);
     const markRequired = converted || showRequiredErrors;
@@ -533,7 +539,20 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             <div className={styles.pane}>
               <div className={styles.paneHeader}>
                 <span className={styles.paneTitle}>{strings.PdfPreviewLabel}</span>
-                <div className={styles.pageNav}>
+                <div className={styles.previewHeaderActions}>
+                  {showDebugUi && currentPreview && (
+                    <button
+                      type="button"
+                      className={styles.debugBtn}
+                      onClick={this._onRestylePage}
+                      disabled={busy}
+                    >
+                      {isRestyling
+                        ? (strings.RestylePageBusy || 'Restyling page…')
+                        : (strings.RestylePageButton || 'Restyle page')}
+                    </button>
+                  )}
+                  <div className={styles.pageNav}>
                   <IconButton
                     className={styles.pageBtn}
                     iconProps={{ iconName: 'ChevronLeft' }}
@@ -559,7 +578,18 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                     onClick={this._onNextPage}
                   />
                 </div>
+                </div>
               </div>
+              {showOcrStyles && currentPreview && (
+                <div className={styles.styleSpanLegend}>
+                  <span className={styles.styleSpanLegendUnderline}>
+                    {strings.StyleLegendUnderline || 'Underline'}
+                  </span>
+                  <span className={styles.styleSpanLegendSeparator}>
+                    {strings.StyleLegendSeparator || 'Separator'}
+                  </span>
+                </div>
+              )}
               {currentPreview ? (
                 <PdfHighlightViewer
                   page={currentPreview}
@@ -1257,6 +1287,61 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     }));
   };
 
+  private _onRestylePage = (): void => {
+    this._restyleCurrentPage().catch(() => {
+      // Errors are surfaced in component state.
+    });
+  };
+
+  private _restyleCurrentPage = async (): Promise<void> => {
+    const page = this.state.pages.filter((item) => item.pageNumber === this.state.currentPage)[0];
+    const source = this._originalPdfBytes
+      ? this._originalPdfBytes.slice()
+      : this.state.file;
+    if (!page || !source) {
+      this.setState({
+        error: strings.RestyleNeedConvert || 'Convert first, then restyle this page.'
+      });
+      return;
+    }
+    const seq = this._restyleSeq + 1;
+    this._restyleSeq = seq;
+    this.setState({
+      isRestyling: true,
+      error: undefined,
+      info: undefined
+    });
+    try {
+      const styled = await PdfOcrService.restylePage(source, page.pageNumber, page.words || []);
+      if (seq !== this._restyleSeq) {
+        return;
+      }
+      this.setState((prev) => ({
+        pages: prev.pages.map((item) => (
+          item.pageNumber === page.pageNumber
+            ? { ...item, words: styled.words, styleSpans: styled.styleSpans }
+            : item
+        )),
+        showOcrStyles: true,
+        isRestyling: false,
+        info: locFormat(
+          strings.RestylePageDone || 'Restyled page {0}. Blue = underline, red = separator.',
+          'Restyled page {0}. Blue = underline, red = separator.',
+          String(page.pageNumber)
+        )
+      }));
+    } catch (err) {
+      if (seq !== this._restyleSeq) {
+        return;
+      }
+      const message = err instanceof Error ? err.message : '';
+      this.setState({
+        isRestyling: false,
+        error: message && message !== 'Error' ? message : (strings.RestyleFailed || 'Could not restyle this page.')
+      });
+    }
+  };
+
   private _onDevToolsOpenChange = (open: boolean): void => {
     this.setState({
       devToolsOpen: open
@@ -1495,8 +1580,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       } catch {
         aiValues = {};
       }
-    } else {
-      info = strings.AiNotConfiguredHint;
     }
 
     let fields = this.state.fields;
@@ -1598,6 +1681,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       this._fileInput.current.value = '';
     }
     this._originalPdfBytes = undefined;
+    this._restyleSeq = this._restyleSeq + 1;
     this._revokePageUrls(this.state.pages);
     this.setState({
       file: undefined,
@@ -1619,6 +1703,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isUploading: false,
       uploadStatus: undefined,
       showRequiredErrors: false,
+      isRestyling: false,
       progress: undefined
     });
   };

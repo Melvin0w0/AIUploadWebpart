@@ -13,6 +13,13 @@ declare interface IAiUploadWebPartStrings {
   ExtractedTextDescription: string;
   DebugExtractedTextDescription: string;
   DebugOcrStyles: string;
+  RestylePageButton: string;
+  RestylePageBusy: string;
+  RestylePageDone: string;
+  RestyleNeedConvert: string;
+  RestyleFailed: string;
+  StyleLegendUnderline: string;
+  StyleLegendSeparator: string;
   ServeDebugBanner: string;
   DebugSourceLabel: string;
   PdfPreviewLabel: string;

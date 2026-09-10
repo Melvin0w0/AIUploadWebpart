@@ -1,4 +1,4 @@
-import { IOcrWord } from './IPdfOcr';
+import { IOcrStyleSpan, IOcrWord } from './IPdfOcr';
 
 /**
  * Convert-to-OCR underline sensitivity.
@@ -76,14 +76,36 @@ export const BOLD = {
   extraOverMedian: 0.02
 };
 
-export function annotateOcrWordStyles(words: IOcrWord[], image: ImageData): IOcrWord[] {
+function pushStyleSpan(
+  debug: IOcrStyleSpan[] | undefined,
+  kind: IOcrStyleSpan['kind'],
+  left: number,
+  right: number,
+  y: number
+): void {
+  if (!debug) {
+    return;
+  }
+  debug.push({
+    kind,
+    x0: left,
+    x1: right,
+    y
+  });
+}
+
+export function annotateOcrWordStyles(
+  words: IOcrWord[],
+  image: ImageData,
+  debugSpans?: IOcrStyleSpan[]
+): IOcrWord[] {
   if (!words || words.length === 0 || !image || image.width < 8 || image.height < 8) {
     return words;
   }
   const pixels = image.data;
   const width = image.width;
   const height = image.height;
-  markUnderlinedWords(words, pixels, width, height);
+  markUnderlinedWords(words, pixels, width, height, debugSpans);
   markBoldWords(words, pixels, width, height);
   return words;
 }
@@ -92,7 +114,8 @@ function markUnderlinedWords(
   words: IOcrWord[],
   pixels: Uint8ClampedArray,
   width: number,
-  height: number
+  height: number,
+  debugSpans?: IOcrStyleSpan[]
 ): void {
   const lines = groupWordRows(words);
   const thresholds = UNDERLINE.maxLum;
@@ -103,16 +126,30 @@ function markUnderlinedWords(
       UNDERLINE.mergeGapMin,
       Math.min(UNDERLINE.mergeGapMax, Math.round(medianWordGap(line) * UNDERLINE.mergeGapWordFactor))
     );
-    if (lineLooksLikeTableRow(box, pixels, width, height, thresholds[0])) {
+    if (lineLooksLikeTableRow(box, pixels, width, height, thresholds[0], debugSpans)) {
       continue;
     }
     let merged: { left: number; right: number }[] = [];
     let usedLum = thresholds[0];
     for (let index = 0; index < thresholds.length; index++) {
-      const found = underlineSpansUnderLine(box, pixels, width, height, thresholds[index], mergeGap);
+      const collected: IOcrStyleSpan[] = [];
+      const found = underlineSpansUnderLine(
+        box,
+        pixels,
+        width,
+        height,
+        thresholds[index],
+        mergeGap,
+        collected
+      );
       if (found.length > 0) {
         merged = found;
         usedLum = thresholds[index];
+        if (debugSpans) {
+          for (let spanIndex = 0; spanIndex < collected.length; spanIndex++) {
+            debugSpans.push(collected[spanIndex]);
+          }
+        }
         break;
       }
     }
@@ -357,7 +394,8 @@ function lineLooksLikeTableRow(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
-  maxLum: number
+  maxLum: number,
+  debugSpans?: IOcrStyleSpan[]
 ): boolean {
   const lineHeight = Math.max(8, line.y1 - line.y0);
   const below0 = Math.floor(line.y1);
@@ -367,15 +405,19 @@ function lineLooksLikeTableRow(
   const below = bestOverlappingSpanInBand(pixels, width, height, below0, below1, line.x0, line.x1, maxLum);
   const above = bestOverlappingSpanInBand(pixels, width, height, above0, above1, line.x0, line.x1, maxLum);
   if (below && isGridRuleSpan(below, line.x0, line.x1, width)) {
+    pushStyleSpan(debugSpans, 'separator', below.left, below.right, below.row);
     return true;
   }
   if (below && spanHasVerticalJoins(pixels, width, height, below, maxLum)) {
+    pushStyleSpan(debugSpans, 'separator', below.left, below.right, below.row);
     return true;
   }
   if (above && below) {
     const leftDiff = Math.abs(above.left - below.left);
     const rightDiff = Math.abs(above.right - below.right);
     if (leftDiff <= 18 && rightDiff <= 18 && (isGridRuleSpan(above, line.x0, line.x1, width) || spanHasVerticalJoins(pixels, width, height, above, maxLum))) {
+      pushStyleSpan(debugSpans, 'separator', below.left, below.right, below.row);
+      pushStyleSpan(debugSpans, 'separator', above.left, above.right, above.row);
       return true;
     }
   }
@@ -457,7 +499,8 @@ function underlineSpansUnderLine(
   width: number,
   height: number,
   maxLum: number,
-  mergeGap: number
+  mergeGap: number,
+  debugSpans?: IOcrStyleSpan[]
 ): { left: number; right: number }[] {
   const lineHeight = Math.max(8, line.y1 - line.y0);
   const row0 = Math.floor(line.y1);
@@ -497,15 +540,20 @@ function underlineSpansUnderLine(
       const span = spans[spanIndex];
       const left = Math.max(col0 - 6, span.left);
       const right = Math.min(col1 + 6, span.right);
-      if (
-        right - left >= minFragment &&
-        !isGridRuleSpan(span, col0, col1, width)
-      ) {
+      if (isGridRuleSpan(span, col0, col1, width)) {
+        pushStyleSpan(debugSpans, 'separator', span.left, span.right, row);
+        continue;
+      }
+      if (right - left >= minFragment) {
         collected.push({ left: span.left, right: span.right });
       }
     }
   }
-  return mergeCloseSpans(collected, mergeGap);
+  const merged = mergeCloseSpans(collected, mergeGap);
+  for (let index = 0; index < merged.length; index++) {
+    pushStyleSpan(debugSpans, 'underline', merged[index].left, merged[index].right, bestRow);
+  }
+  return merged;
 }
 
 function underlineScoreOnRow(
