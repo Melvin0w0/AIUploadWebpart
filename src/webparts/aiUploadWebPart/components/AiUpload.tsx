@@ -150,7 +150,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isUploading: false,
       uploadStatus: undefined,
       showRequiredErrors: false,
-      showOcrStyles: devToolsOpen,
+      showOcrStyles: false,
       devToolsOpen,
       fieldDebugMarks: [],
       history: loadFieldHistory(),
@@ -1258,10 +1258,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _onDevToolsOpenChange = (open: boolean): void => {
-    this.setState((prev) => ({
-      devToolsOpen: open,
-      showOcrStyles: open ? true : prev.showOcrStyles
-    }));
+    this.setState({
+      devToolsOpen: open
+    });
   };
 
   private _onPreviousPage = (): void => {
