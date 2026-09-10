@@ -74,7 +74,7 @@ import {
   IFieldHistory
 } from '../services/fieldHistory';
 import { lookupLeadingBlFromNotificationSetup } from '../services/notificationSetup';
-import { isSpfxServeDebug } from '../services/spfxLocalDebug';
+import { isDevToolsOpen, isSpfxServeDebug, subscribeDevToolsOpen } from '../services/spfxLocalDebug';
 
 interface IFormField {
   id: string;
@@ -102,6 +102,7 @@ interface IAiUploadState {
   uploadStatus: string | undefined;
   showRequiredErrors: boolean;
   showOcrStyles: boolean;
+  devToolsOpen: boolean;
   fieldDebugMarks: IOcrFieldMark[];
   history: IFieldHistory;
   historyFieldId: string | undefined;
@@ -118,6 +119,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _historyCloseTimer: number | undefined;
   private _leadingBlLookupSeq: number = 0;
   private _leadingBlLookupTimer: number | undefined;
+  private _stopDevToolsWatch: (() => void) | undefined;
 
   public constructor(props: IAiUploadProps) {
     super(props);
@@ -127,7 +129,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._calendarOpen = false;
     this._leadingBlLookupSeq = 0;
     this._leadingBlLookupTimer = undefined;
+    this._stopDevToolsWatch = undefined;
     const fields = this._fieldsFromConfig(props.formFields);
+    const devToolsOpen = isDevToolsOpen();
     this.state = {
       file: undefined,
       pages: [],
@@ -146,7 +150,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isUploading: false,
       uploadStatus: undefined,
       showRequiredErrors: false,
-      showOcrStyles: false,
+      showOcrStyles: devToolsOpen,
+      devToolsOpen,
       fieldDebugMarks: [],
       history: loadFieldHistory(),
       historyFieldId: undefined
@@ -157,6 +162,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     document.addEventListener('mousedown', this._onDocumentMouseDownCapture, true);
     document.addEventListener('click', this._onDocumentClickCapture, true);
     document.addEventListener('submit', this._onDocumentSubmitCapture, true);
+    this._stopDevToolsWatch = subscribeDevToolsOpen(this._onDevToolsOpenChange);
   }
 
   public componentDidUpdate(prevProps: IAiUploadProps): void {
@@ -183,6 +189,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     }
     this._leadingBlLookupSeq = this._leadingBlLookupSeq + 1;
     this._revokePageUrls(this.state.pages);
+    if (this._stopDevToolsWatch) {
+      this._stopDevToolsWatch();
+      this._stopDevToolsWatch = undefined;
+    }
   }
 
   public render(): React.ReactElement<IAiUploadProps> {
@@ -206,6 +216,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadStatus,
       showRequiredErrors,
       showOcrStyles,
+      devToolsOpen,
       fieldDebugMarks,
       historyFieldId
     } = this.state;
@@ -237,10 +248,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       : destinationUrl;
     const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
     const isLocalDebug = isSpfxServeDebug();
+    const showDebugUi = isLocalDebug || devToolsOpen;
 
     return (
-      <section className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''} ${isLocalDebug ? styles.debugMode : ''}`}>
-        {isLocalDebug && (
+      <section className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''} ${showDebugUi ? styles.debugMode : ''}`}>
+        {showDebugUi && (
           <div className={styles.debugBanner} role="status">
             {strings.ServeDebugBanner || 'DEBUG'}
           </div>
@@ -1242,6 +1254,13 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _onToggleOcrStyles = (): void => {
     this.setState((prev) => ({
       showOcrStyles: !prev.showOcrStyles
+    }));
+  };
+
+  private _onDevToolsOpenChange = (open: boolean): void => {
+    this.setState((prev) => ({
+      devToolsOpen: open,
+      showOcrStyles: open ? true : prev.showOcrStyles
     }));
   };
 
