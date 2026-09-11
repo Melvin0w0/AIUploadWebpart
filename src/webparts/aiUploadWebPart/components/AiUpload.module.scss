@@ -190,18 +190,6 @@
   box-shadow: var(--apple-shadow);
 }
 
-.kindSelect {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1 1 100%;
-}
-
-.kindSegmented {
-  align-self: flex-start;
-  min-width: 240px;
-}
-
 .fileMeta {
   display: flex;
   flex-direction: column;
@@ -671,8 +659,7 @@
   pointer-events: none;
 }
 
-.segmentedNo .segmentThumb,
-.segmentedOutgoing .segmentThumb {
+.segmentedNo .segmentThumb {
   transform: translateX(100%);
 }
 
@@ -1194,11 +1181,6 @@
   .fileName {
     font-size: 17px;
     font-weight: 600;
-  }
-
-  .kindSegmented {
-    min-width: 0;
-    width: 100%;
   }
 
   .toolbarActions {
