@@ -4,7 +4,7 @@ import { assertActiveRootUrlMapping, ROOT_URL_MAPPING_LIST_TITLE } from './rootU
 import {
   buildFieldPayload,
   ILibraryField,
-  isWritableLibraryField
+  isLibraryMetadataField
 } from './libraryFieldMap';
 
 export interface ISharePointUploadResult {
@@ -390,7 +390,7 @@ export class SharePointUploadService {
     });
     await this._ensureOk(response, 'Could not read library columns.');
     const json = await response.json() as { value?: ILibraryField[] };
-    return (json.value || []).filter(isWritableLibraryField);
+    return (json.value || []).filter(isLibraryMetadataField);
   }
 
   private async _ensureOk(response: SPHttpClientResponse, fallback: string): Promise<void> {

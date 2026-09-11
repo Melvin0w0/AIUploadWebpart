@@ -1,5 +1,5 @@
 import { INamedValue } from './uploadDestination';
-import { isNameField } from '../constants/defaultFormFields';
+import { isNameField, isRegistrationNumberField } from '../constants/defaultFormFields';
 
 export interface ILibraryField {
   InternalName: string;
@@ -75,6 +75,8 @@ export const SYSTEM_FIELD_NAMES: string[] = [
   '_moderationcomments'
 ];
 
+const REGISTRATION_NUMBER_INTERNAL: string = 'Registration_x0020_Number';
+
 const ALIASES: { [key: string]: string[] } = {
   name: ['title', 'name', 'documentname'],
   registrationnumber: ['registrationnumber', 'regno', 'regnumber'],
@@ -95,13 +97,14 @@ const ALIASES: { [key: string]: string[] } = {
   cctoaecom: ['cctoaecom', 'cc', 'ccto']
 };
 
-export function isWritableLibraryField(field: ILibraryField): boolean {
+export function isLibraryMetadataField(field: ILibraryField): boolean {
   const internal = (field.InternalName || '').toLowerCase();
   const type = field.TypeAsString || '';
-  return !field.Hidden &&
-    !field.ReadOnlyField &&
-    SYSTEM_FIELD_NAMES.indexOf(internal) < 0 &&
-    SKIP_TYPES.indexOf(type) < 0;
+  return SYSTEM_FIELD_NAMES.indexOf(internal) < 0 && SKIP_TYPES.indexOf(type) < 0;
+}
+
+export function isWritableLibraryField(field: ILibraryField): boolean {
+  return isLibraryMetadataField(field) && !field.ReadOnlyField;
 }
 
 export function buildFieldPayload(fieldValues: INamedValue[], columns: ILibraryField[]): FieldPayload {
@@ -124,7 +127,9 @@ export function buildFieldPayload(fieldValues: INamedValue[], columns: ILibraryF
     if (!column) {
       return;
     }
-    const converted = convertValue(value, column.TypeAsString);
+    const converted = isRegistrationNumberField(field.label)
+      ? value
+      : convertValue(value, column.TypeAsString);
     if (converted === undefined) {
       return;
     }
@@ -132,7 +137,37 @@ export function buildFieldPayload(fieldValues: INamedValue[], columns: ILibraryF
     used[column.InternalName.toLowerCase()] = true;
   });
 
+  applyRegistrationNumber(payload, fieldValues, columns);
   return payload;
+}
+
+function applyRegistrationNumber(
+  payload: FieldPayload,
+  fieldValues: INamedValue[],
+  columns: ILibraryField[]
+): void {
+  const value = registrationNumberValue(fieldValues);
+  if (!value) {
+    return;
+  }
+  if (Object.keys(payload).some((key) => normalizeKey(key) === 'registrationnumber')) {
+    return;
+  }
+
+  const column = columns.filter((item) => isRegistrationNumberColumn(item) && isLibraryMetadataField(item))[0];
+  payload[(column && column.InternalName) || REGISTRATION_NUMBER_INTERNAL] = value;
+}
+
+function registrationNumberValue(fieldValues: INamedValue[]): string {
+  const fromRegistration = fieldValues.filter((field) => isRegistrationNumberField(field.label))[0];
+  const fromName = fieldValues.filter((field) => isNameField(field.label))[0];
+  return ((fromRegistration && fromRegistration.value) || (fromName && fromName.value) || '').trim();
+}
+
+function isRegistrationNumberColumn(column: ILibraryField): boolean {
+  return normalizeKey(column.Title) === 'registrationnumber' ||
+    normalizeKey(column.InternalName) === 'registrationnumber' ||
+    equalsIgnoreCase(column.InternalName, REGISTRATION_NUMBER_INTERNAL);
 }
 
 function findColumn(

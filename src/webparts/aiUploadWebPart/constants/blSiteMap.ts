@@ -1,10 +1,9 @@
 export const BL_SITE_MAP: { [name: string]: string } = {
   'Architecture': '/sites/edsp_ARC',
   'Building Engineering': '/sites/edsp_BEG',
+  'Digital': '/sites/edsp_ISD',
   'Environment': '/sites/edsp_ENV',
   'Geotechnical': '/sites/edsp_GEO',
-  'Digital': '/sites/edsp_ISD',
-  'Land Supply and Municipal': '/sites/edsp_LSM',
   'MEP': '/sites/edsp_MEP',
   'Project and Construction Management': '/sites/edsp_PCM',
   'Program, Cost and Consultancy': '/sites/edsp_PCC',
