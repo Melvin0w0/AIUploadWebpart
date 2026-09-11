@@ -313,6 +313,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                       href={successUrl}
                       target="_blank"
                       rel="noopener noreferrer"
+                      data-interception="off"
+                      onClick={(event) => this._openInNewTab(event, successUrl)}
                     >
                       {strings.OpenUploadedFile || 'Open file'}
                     </a>
@@ -323,6 +325,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                       href={successFolderUrl}
                       target="_blank"
                       rel="noopener noreferrer"
+                      data-interception="off"
+                      onClick={(event) => this._openInNewTab(event, successFolderUrl)}
                     >
                       {strings.OpenUploadedFolder || 'Open folder'}
                     </a>
@@ -736,7 +740,15 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
               <div className={styles.destination}>
                 {strings.UploadDestinationLabel}:{' '}
                 {destinationUrl && destination.siteUrl ? (
-                  <Link href={destinationUrl} target="_blank">{destinationUrl}</Link>
+                  <Link
+                    href={destinationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-interception="off"
+                    onClick={(event) => this._openInNewTab(event, destinationUrl)}
+                  >
+                    {destinationUrl}
+                  </Link>
                 ) : (
                   destinationLabel
                 )}
@@ -1953,6 +1965,15 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         URL.revokeObjectURL(url);
       }
     });
+  };
+
+  private _openInNewTab = (event: React.MouseEvent<HTMLElement>, url: string): void => {
+    if (!url) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   private _clearError = (): void => {
