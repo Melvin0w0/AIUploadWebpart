@@ -81,6 +81,8 @@ declare interface IAiUploadWebPartStrings {
   FieldPlaceholder: string;
   NamePlaceholder: string;
   NameDescription: string;
+  IncomingNamePlaceholder: string;
+  IncomingNameDescription: string;
   HighlightHint: string;
   FillSelectionButton: string;
   SelectFieldFirst: string;
@@ -105,6 +107,7 @@ declare interface IAiUploadWebPartStrings {
   LanguageEnglishTraditionalChinese: string;
   LanguageEnglishSimplifiedChinese: string;
   RecentValuesLabel: string;
+  CorrespondenceKindLabel: string;
   IncomingLabel: string;
   OutgoingLabel: string;
   IncomingNoAutoFillHint: string;

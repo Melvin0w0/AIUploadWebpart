@@ -16,6 +16,10 @@ export function isRegistrationNumberField(label: string): boolean {
   return (label || '').trim().toLowerCase() === REGISTRATION_NUMBER_LABEL.toLowerCase();
 }
 
+export function isReadOnlyFormField(label: string): boolean {
+  return isNameField(label) || isRegistrationNumberField(label);
+}
+
 export function isSenderField(label: string): boolean {
   return (label || '').trim().toLowerCase() === SENDER_LABEL.toLowerCase();
 }

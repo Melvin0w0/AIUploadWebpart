@@ -47,3 +47,18 @@ export function nameFromPdfFile(fileName: string): string {
   const name = (fileName || '').replace(/^.*[\\/]/, '').trim();
   return name.replace(/\.pdf$/i, '');
 }
+
+export function generateIncomingName(now?: Date): string {
+  const date = now || new Date();
+  const yy = String(date.getFullYear()).slice(-2);
+  const MM = twoDigits(date.getMonth() + 1);
+  const dd = twoDigits(date.getDate());
+  const HH = twoDigits(date.getHours());
+  const mm = twoDigits(date.getMinutes());
+  const ss = twoDigits(date.getSeconds());
+  return `I${yy}${MM}${dd}${HH}${mm}${ss}Z0001`;
+}
+
+function twoDigits(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
+}

@@ -22,8 +22,8 @@ import { IOcrPageResult, IOcrProgress } from '../services/IPdfOcr';
 import { buildOcrFieldMarks, formatOcrTextWithDebugMarks, IOcrFieldMark } from '../services/ocrFieldMarks';
 import { formatOcrTextWithStyles, joinOcrWords, stripOcrStyleTags } from '../services/ocrSelection';
 import PdfHighlightViewer from './PdfHighlightViewer';
-import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
-import { CorrespondenceKind, correspondenceKindFromFileName, nameFromPdfFile } from '../constants/incomingName';
+import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isReadOnlyFormField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
+import { CorrespondenceKind, generateIncomingName, nameFromPdfFile } from '../constants/incomingName';
 import {
   canonicalLeadingBl,
   isLeadingBlField,
@@ -124,6 +124,7 @@ interface IAiUploadState {
   fieldDebugMarks: IOcrFieldMark[];
   history: IFieldHistory;
   historyFieldId: string | undefined;
+  correspondenceKind: CorrespondenceKind;
   uploadType: UploadType;
   labelType: LabelType;
 }
@@ -152,7 +153,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._leadingBlLookupTimer = undefined;
     this._stopDevToolsWatch = undefined;
     this._restyleSeq = 0;
-    const fields = this._fieldsFromConfig(props.formFields);
+    const fields = this._applyNameForKind(this._fieldsFromConfig(props.formFields), 'incoming');
     const devToolsOpen = isDevToolsOpen();
     this.state = {
       file: undefined,
@@ -178,6 +179,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fieldDebugMarks: [],
       history: loadFieldHistory(),
       historyFieldId: undefined,
+      correspondenceKind: 'incoming',
       uploadType: UPLOAD_TYPE_NORMAL,
       labelType: LABEL_TYPE_NORMAL
     };
@@ -246,6 +248,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       devToolsOpen,
       fieldDebugMarks,
       historyFieldId,
+      correspondenceKind,
       uploadType,
       labelType
     } = this.state;
@@ -276,7 +279,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const destinationLabel = !destination.siteUrl
       ? strings.UploadDestinationPending
       : destinationUrl;
-    const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
+    const documentKind = correspondenceKind === 'outgoing' ? 'outgoing' : 'incoming';
     const isLocalDebug = isSpfxServeDebug();
     const showDebugUi = isLocalDebug || devToolsOpen;
 
@@ -340,6 +343,44 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         {warning && this._renderBanner('warning', warning, this._clearWarning)}
 
         <div className={styles.toolbar}>
+          <div className={styles.kindSelect}>
+            <span className={styles.fileLabel}>{strings.CorrespondenceKindLabel || 'Incoming or Outgoing'}</span>
+            <div
+              className={`${styles.segmented} ${styles.kindSegmented} ${documentKind === 'outgoing' ? styles.segmentedOutgoing : ''}`}
+              role="radiogroup"
+              aria-label={strings.CorrespondenceKindLabel || 'Incoming or Outgoing'}
+            >
+              <span className={styles.segmentThumb} aria-hidden={true} />
+              <button
+                type="button"
+                className={`${styles.segment} ${documentKind === 'incoming' ? styles.segmentActive : ''}`}
+                aria-checked={documentKind === 'incoming'}
+                role="radio"
+                disabled={busy}
+                onClick={(event) => {
+                  event.preventDefault();
+                  this._pulseYesNo(event.currentTarget);
+                  this._onCorrespondenceKindChange('incoming');
+                }}
+              >
+                {strings.IncomingLabel || 'Incoming'}
+              </button>
+              <button
+                type="button"
+                className={`${styles.segment} ${documentKind === 'outgoing' ? styles.segmentActive : ''}`}
+                aria-checked={documentKind === 'outgoing'}
+                role="radio"
+                disabled={busy}
+                onClick={(event) => {
+                  event.preventDefault();
+                  this._pulseYesNo(event.currentTarget);
+                  this._onCorrespondenceKindChange('outgoing');
+                }}
+              >
+                {strings.OutgoingLabel || 'Outgoing'}
+              </button>
+            </div>
+          </div>
           <input
             ref={this._fileInput}
             type="file"
@@ -352,13 +393,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             <span className={styles.fileLabel}>{strings.SelectPdfLabel}</span>
             <span className={styles.fileNameRow}>
               <span className={styles.fileName}>{file ? file.name : strings.ChooseFile}</span>
-              {documentKind !== 'unknown' && (
-                <span className={`${styles.kindBadge} ${documentKind === 'incoming' ? styles.kindIncoming : styles.kindOutgoing}`}>
-                  {documentKind === 'incoming'
-                    ? (strings.IncomingLabel || 'Incoming')
-                    : (strings.OutgoingLabel || 'Outgoing')}
-                </span>
-              )}
             </span>
           </div>
           <div className={styles.toolbarActions}>
@@ -506,12 +540,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           onChange={(_event, newValue) => this._onFieldValueChange(field.id, newValue || '')}
                           onFocus={() => {
                             this._setActiveField(field.id);
-                            this._openHistory(field.id);
+                            if (!isReadOnlyFormField(field.label)) {
+                              this._openHistory(field.id);
+                            }
                           }}
                           onBlur={() => this._onHistoryFieldBlur(field)}
                           placeholder={
                             isNameField(field.label)
-                              ? strings.NamePlaceholder
+                              ? (documentKind === 'incoming'
+                                ? (strings.IncomingNamePlaceholder || 'Generated Incoming number')
+                                : strings.NamePlaceholder)
                               : isRegistrationNumberField(field.label)
                                 ? strings.RegistrationNumberPlaceholder
                                 : isProjectNumberField(field.label)
@@ -520,7 +558,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                           }
                           description={
                             isNameField(field.label)
-                              ? strings.NameDescription
+                              ? (documentKind === 'incoming'
+                                ? (strings.IncomingNameDescription || 'Generated when Incoming is selected. This field is read only.')
+                                : strings.NameDescription)
                               : isRegistrationNumberField(field.label)
                                 ? strings.RegistrationNumberDescription
                                 : isProjectNumberField(field.label)
@@ -530,7 +570,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                                   : undefined
                           }
                           maxLength={isProjectNumberField(field.label) ? 8 : undefined}
-                          readOnly={isRegistrationNumberField(field.label)}
+                          readOnly={isReadOnlyFormField(field.label)}
                           required={isRequiredField(field.label)}
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
@@ -539,7 +579,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                         {this._renderFieldHistory(field)}
                         </div>
                       )}
-                      {!isRegistrationNumberField(field.label) && (
+                      {!isReadOnlyFormField(field.label) && (
                       <IconButton
                         className={styles.clearFieldBtn}
                         iconProps={{ iconName: 'Cancel' }}
@@ -1041,7 +1081,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const target = this.state.fields.filter((field) => field.id === fieldId)[0];
     this.setState((prev) => {
       const current = prev.fields.filter((field) => field.id === fieldId)[0];
-      if (current && isRegistrationNumberField(current.label)) {
+      if (current && isReadOnlyFormField(current.label)) {
         return {
           fields: prev.fields,
           activeFieldId: fieldId,
@@ -1120,23 +1160,57 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _applyPdfFileName = (fields: IFormField[], fileName?: string): IFormField[] => {
     const pdfName = fileName ? nameFromPdfFile(fileName) : '';
     const withName = fields.map((field) => (
-      isNameField(field.label) && pdfName
-        ? { ...field, value: pdfName, debugSource: 'PDF 檔名' }
+      isNameField(field.label)
+        ? { ...field, value: pdfName, debugSource: pdfName ? 'PDF 檔名' : undefined }
         : field
     ));
     return this._syncRegistrationFromName(withName);
   };
 
-  private _fieldsForSelectedFile = (fields: IFormField[], fileName: string): IFormField[] => {
-    const kind = correspondenceKindFromFileName(fileName);
-    const next = kind === 'incoming'
+  private _ensureIncomingName = (fields: IFormField[], regenerate?: boolean): IFormField[] => {
+    const nameField = fields.filter((field) => isNameField(field.label))[0];
+    const current = nameField ? (nameField.value || '').trim() : '';
+    const value = regenerate || !current ? generateIncomingName() : current;
+    const withName = fields.map((field) => (
+      isNameField(field.label)
+        ? { ...field, value, debugSource: 'Incoming 編號' }
+        : field
+    ));
+    return this._syncRegistrationFromName(withName);
+  };
+
+  private _applyNameForKind = (fields: IFormField[], kind: CorrespondenceKind, fileName?: string, regenerateIncoming?: boolean): IFormField[] => {
+    if (kind === 'outgoing') {
+      return this._applyPdfFileName(fields, fileName);
+    }
+    return this._ensureIncomingName(fields, regenerateIncoming);
+  };
+
+  private _fieldsForSelectedFile = (fields: IFormField[], fileName: string, kind?: CorrespondenceKind): IFormField[] => {
+    const selectedKind = kind === 'outgoing' ? 'outgoing' : (kind === 'incoming' ? 'incoming' : this._selectedKind());
+    const next = selectedKind === 'incoming'
       ? fields.map((field) => (
         isNameField(field.label) || isRegistrationNumberField(field.label)
           ? field
           : { ...field, value: this._defaultFieldValue(field.label), debugSource: undefined }
       ))
       : fields;
-    return this._applyPdfFileName(next, fileName);
+    return this._applyNameForKind(next, selectedKind, fileName);
+  };
+
+  private _selectedKind = (): CorrespondenceKind => {
+    return this.state.correspondenceKind === 'outgoing' ? 'outgoing' : 'incoming';
+  };
+
+  private _onCorrespondenceKindChange = (kind: CorrespondenceKind): void => {
+    const nextKind = kind === 'outgoing' ? 'outgoing' : 'incoming';
+    if (nextKind === this._selectedKind()) {
+      return;
+    }
+    this.setState((prev) => ({
+      correspondenceKind: nextKind,
+      fields: this._applyNameForKind(prev.fields, nextKind, prev.file ? prev.file.name : undefined, nextKind === 'incoming')
+    }));
   };
 
   private _syncRegistrationFromName = (fields: IFormField[]): IFormField[] => {
@@ -1164,8 +1238,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       return this._stripHonorifics(this._stripParentheses(value));
     }
     if (isSenderField(label)) {
-      const file = this.state.file;
-      if (file && correspondenceKindFromFileName(file.name) === 'incoming') {
+      if (this._selectedKind() === 'incoming') {
         return this._unwrapSenderIfFullyParenthesized(value);
       }
       return value;
@@ -1542,7 +1615,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         ? this._originalPdfBytes
         : new Uint8Array(await file.arrayBuffer());
       let labelWarning = '';
-      const isIncoming = correspondenceKindFromFileName(file.name) === 'incoming';
+      const isIncoming = this._selectedKind() === 'incoming';
       if (isIncoming) {
         try {
           this.setState({ uploadStatus: strings.UploadGeneratingLabel || 'Generating label page…' });
@@ -1663,7 +1736,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       );
 
       let filled: { fields: IFormField[]; info: string | undefined; warning?: string };
-      const documentKind = correspondenceKindFromFileName(file.name);
+      const documentKind = this._selectedKind();
       this.setState({
         progress: {
           page: result.pages.length,
@@ -1740,7 +1813,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
 
     let fields = this.state.fields;
     try {
-      fields = this._applyPdfFileName(this.state.fields.map((field) => {
+      const mapped = this.state.fields.map((field) => {
         if (isNameField(field.label)) {
           return field;
         }
@@ -1752,7 +1825,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           value: this._normalizeFieldValue(field.label, pickedField.value),
           debugSource: pickedField.source || undefined
         };
-      }), this.state.file ? this.state.file.name : undefined);
+      });
+      fields = incoming
+        ? this._ensureIncomingName(mapped)
+        : this._applyPdfFileName(mapped, this.state.file ? this.state.file.name : undefined);
     } catch {
       fields = this.state.fields;
     }
@@ -1847,11 +1923,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       pages: [],
       currentPage: 1,
       selectedWordIndexes: [],
-      fields: this.state.fields.map((field) => ({
+      fields: this._applyNameForKind(this.state.fields.map((field) => ({
         ...field,
         value: this._defaultFieldValue(field.label),
         debugSource: undefined
-      })),
+      })), 'incoming', undefined, true),
       fieldDebugMarks: [],
       error: undefined,
       info: undefined,
@@ -1865,7 +1941,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isRestyling: false,
       progress: undefined,
       uploadType: UPLOAD_TYPE_NORMAL,
-      labelType: LABEL_TYPE_NORMAL
+      labelType: LABEL_TYPE_NORMAL,
+      correspondenceKind: 'incoming'
     });
   };
 
