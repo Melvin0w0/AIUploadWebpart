@@ -53,12 +53,25 @@ export async function drawBarcodeCanvas(
     });
     return canvas;
   } catch {
-    ctx.fillStyle = 'red';
-    ctx.font = 'bold 40px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('Error', canvasWidth / 2, canvasHeight / 2 + 10);
+    return errorCanvas(canvasWidth, canvasHeight);
+  }
+}
+
+function errorCanvas(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
     return canvas;
   }
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = 'red';
+  ctx.font = 'bold 40px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Error', width / 2, height / 2 + 10);
+  return canvas;
 }
 
 async function ensureZXing(): Promise<void> {
