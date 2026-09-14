@@ -3,9 +3,17 @@ import { isOrganizationField, isReceiverField, isRefNoField, isSenderField, isSu
 import { isIssueDateField } from '../../constants/issueDate';
 import { isProjectNumberField } from '../../constants/projectNumber';
 import { IAiExtractionHints, IDetectedFields, IPickedValue, emptyDetectedFields, picked, tryPicked, tryText, tryTextAsync } from '../correspondenceTypes';
-import { extractOurRefNo, extractYourRefNo } from '../fieldExtractor';
+import { extractOurRefNo, extractOurRefOnly, extractYourRefNo } from '../fieldExtractor';
 import { IOcrPageResult } from '../IPdfOcr';
 import { analyzeDocumentSignature, extractSubjectBelowDearSir, subjectAppearsInPage } from '../signatureSender';
+import {
+  extractIncomingEmailCcFromLastPage,
+  extractIncomingEmailHeaders,
+  extractIncomingEmailOurRef,
+  extractIncomingEmailToFromLastPage,
+  incomingLastEmailPages,
+  incomingPagesLookLikeEmail
+} from './email';
 import {
   classifyIncomingLetter,
   extractIncomingAgreementNo,
@@ -21,47 +29,66 @@ import {
 
 export async function detectIncomingFields(pages: IOcrPageResult[]): Promise<IDetectedFields> {
   const list = pages || [];
-  const firstPage = list[0];
+  const looksEmail = incomingPagesLookLikeEmail(list);
+  const workPages = looksEmail ? incomingLastEmailPages(list) : list;
+  const firstPage = workPages[0] || list[0];
   const detected = emptyDetectedFields(firstPage);
   const classification = classifyIncomingLetter(firstPage);
-  detected.letterType = classification.letterType;
-  detected.signature = await analyzeDocumentSignature(list);
-  const receiver = tryPicked(() => extractIncomingReceiverLocated(list));
-  detected.receiverName = receiver.value;
-  detected.sources.receiver = receiver.source;
+  detected.letterType = looksEmail ? 'email' : classification.letterType;
+  const email = detected.letterType === 'email' ? extractIncomingEmailHeaders(list) : undefined;
+  detected.signature = await analyzeDocumentSignature(workPages);
+  if (looksEmail) {
+    const emailTo = extractIncomingEmailToFromLastPage(list);
+    detected.receiverName = emailTo;
+    detected.sources.receiver = emailTo ? 'Email To' : '';
+  } else {
+    const receiver = tryPicked(() => extractIncomingReceiverLocated(list));
+    detected.receiverName = receiver.value;
+    detected.sources.receiver = receiver.source;
+  }
   const organization = tryPicked(() => extractIncomingOrganizationLocated(firstPage));
   detected.organization = organization.value;
   detected.sources.organization = organization.source;
-  detected.subjectText = tryText(() => extractIncomingSubject(firstPage));
-  if (!detected.subjectText) {
+  detected.subjectText = email && email.subject
+    ? email.subject
+    : tryText(() => extractIncomingSubject(firstPage));
+  if (!detected.subjectText && !looksEmail) {
     detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
   }
   if (detected.subjectText) {
-    detected.sources.subject = 'Dear 後粗體+底線';
+    detected.sources.subject = looksEmail ? 'Email Subject' : 'Dear 後粗體+底線';
   }
-  detected.refNo = tryText(() => extractOurRefNo(list));
+  detected.refNo = looksEmail
+    ? (extractIncomingEmailOurRef(list) || tryText(() => extractOurRefOnly(list)))
+    : tryText(() => extractOurRefNo(list));
   if (detected.refNo) {
     detected.sources.refNo = 'Our Ref';
   }
-  detected.yourRef = tryText(() => extractYourRefNo(list));
+  detected.yourRef = tryText(() => extractYourRefNo(looksEmail ? workPages : list));
   if (detected.yourRef) {
     detected.sources.yourRef = 'Your Ref';
   }
-  detected.agreementNo = tryText(() => extractIncomingAgreementNo(firstPage));
+  detected.agreementNo = (email && email.agreementNo) || tryText(() => extractIncomingAgreementNo(firstPage));
   if (detected.agreementNo) {
     detected.sources.agreementNo = 'Agreement / Contract No.';
   }
-  detected.issueDate = tryText(() => extractIncomingIssueDate(list));
+  detected.issueDate = (email && email.sent) || tryText(() => extractIncomingIssueDate(looksEmail ? workPages : list));
   if (detected.issueDate) {
-    detected.sources.issueDate = 'Date';
+    detected.sources.issueDate = email && email.sent ? 'Email Sent' : 'Date';
   }
   detected.memoSender = tryText(() => extractIncomingMemoSender(firstPage));
-  const closingSender = tryPicked(() => extractIncomingSenderLocated(list));
+  const closingSender = tryPicked(() => extractIncomingSenderLocated(looksEmail ? workPages : list));
   const inkParenSender = incomingSignatureParenName(detected.signature.textBelow);
   const memoSender = incomingSenderName(detected.memoSender);
   let senderName = '';
   let senderSource = '';
-  if (closingSender.value) {
+  if (looksEmail) {
+    const ccSender = extractIncomingEmailCcFromLastPage(list);
+    if (ccSender) {
+      senderName = ccSender;
+      senderSource = 'Email CC';
+    }
+  } else if (closingSender.value) {
     senderName = closingSender.value;
     senderSource = closingSender.source;
   } else if (inkParenSender) {
@@ -86,14 +113,38 @@ export function pickIncomingFieldValue(
   keywordValue: string
 ): IPickedValue {
   if (isSenderField(label)) {
+    if (detected.letterType === 'email') {
+      if (detected.signature.senderName) {
+        return picked(detected.signature.senderName, detected.sources.sender);
+      }
+      if (aiValue && aiValue.trim()) {
+        return picked(aiValue.trim(), 'AI');
+      }
+      return picked(keywordValue || '', keywordValue ? '關鍵字' : '');
+    }
     return picked(incomingSenderName(detected.signature.senderName), detected.sources.sender);
   }
   if (isReceiverField(label)) {
+    if (detected.letterType === 'email') {
+      if (detected.receiverName) {
+        return picked(detected.receiverName, detected.sources.receiver);
+      }
+      if (aiValue && aiValue.trim()) {
+        return picked(aiValue.trim(), 'AI');
+      }
+      return picked(keywordValue || '', keywordValue ? '關鍵字' : '');
+    }
     return picked(detected.receiverName, detected.sources.receiver);
   }
   if (isSubjectField(label)) {
     if (detected.subjectText) {
       return picked(detected.subjectText, detected.sources.subject || 'Dear 後粗體+底線');
+    }
+    if (detected.letterType === 'email') {
+      if (aiValue && aiValue.trim()) {
+        return picked(aiValue.trim(), 'AI');
+      }
+      return picked(keywordValue || '', keywordValue ? '關鍵字' : '');
     }
     return picked(groundedSubject(detected.firstPage, aiValue), 'AI');
   }

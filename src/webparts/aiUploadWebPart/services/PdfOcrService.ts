@@ -2,7 +2,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import Tesseract from 'tesseract.js';
 import pdfWorkerAsset from '../assets/pdf.worker.min.jpg';
-import { IOcrPageResult, IOcrProgress, IOcrResult, IOcrStyleSpan, IOcrWord } from './IPdfOcr';
+import { IOcrPageResult, IOcrProgress, IOcrResult, IOcrStyleSpan, IOcrWord, OcrPageDecision } from './IPdfOcr';
 import { annotateOcrWordStyles } from './ocrWordStyles';
 
 const MAX_RENDER_WIDTH = 1600;
@@ -45,7 +45,8 @@ export class PdfOcrService {
     source: File | Uint8Array,
     language: string,
     onProgress: (progress: IOcrProgress) => void,
-    onPage?: (page: IOcrPageResult) => void
+    onPage?: (page: IOcrPageResult) => void,
+    decidePage?: (previous: IOcrPageResult | undefined, current: IOcrPageResult) => OcrPageDecision
   ): Promise<IOcrResult> {
     await ensurePdfJsWorker();
 
@@ -124,15 +125,27 @@ export class PdfOcrService {
           words,
           styleSpans
         };
-        pages.push(pageResult);
-        if (onPage) {
-          onPage(pageResult);
-        }
 
         canvas.width = 0;
         canvas.height = 0;
 
-        if (pageHasClosing(pageText)) {
+        const previous = pages[pages.length - 1];
+        const action = decidePage
+          ? decidePage(previous, pageResult)
+          : (pageHasClosing(pageText) ? 'keep-stop' : 'keep-continue');
+
+        if (action === 'drop-stop') {
+          if (pageResult.imageUrl) {
+            URL.revokeObjectURL(pageResult.imageUrl);
+          }
+          break;
+        }
+
+        pages.push(pageResult);
+        if (onPage) {
+          onPage(pageResult);
+        }
+        if (action === 'keep-stop') {
           break;
         }
       }

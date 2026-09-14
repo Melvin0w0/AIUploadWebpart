@@ -3,6 +3,7 @@ import { formatIssueDate, parseIssueDate } from '../../constants/issueDate';
 import { IPickedValue, picked } from '../correspondenceTypes';
 import { IOcrPageResult, IOcrWord } from '../IPdfOcr';
 import { formatOcrTextWithStyles, joinOcrWords } from '../ocrSelection';
+import { looksLikeIncomingEmail } from './email';
 import { SUBJECT } from '../ocrWordStyles';
 
 const DATE_LABELS: string[] = ['Date', '日期'];
@@ -862,7 +863,7 @@ function isIncomingMetaHeader(line: string): boolean {
 }
 
 function detectLetterType(text: string, hasOurRef: boolean): IncomingLetterType {
-  if (/\bfrom\s*:/i.test(text) && /\bto\s*:/i.test(text) && /\bsubject\s*:/i.test(text)) {
+  if (looksLikeIncomingEmail(text)) {
     return 'email';
   }
   if (/\b(?:memorandum|circular|fax\s+cover)\b/i.test(text) || /內部通告|通函/.test(text)) {

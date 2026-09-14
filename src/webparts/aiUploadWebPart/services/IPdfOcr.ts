@@ -39,4 +39,6 @@ export interface IOcrResult {
   pages: IOcrPageResult[];
 }
 
+export type OcrPageDecision = 'keep-continue' | 'keep-stop' | 'drop-stop';
+
 export type OcrLanguage = 'eng' | 'chi_tra' | 'chi_sim' | 'eng+chi_tra' | 'eng+chi_sim';

@@ -72,6 +72,7 @@ import {
 import { extractFieldValues } from '../services/fieldExtractor';
 import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFieldExtractor';
 import { detectIncomingFields, incomingAiHints, pickIncomingFieldValue } from '../services/incoming/fields';
+import { createIncomingOcrDecider, keepIncomingEmailPreviewPages } from '../services/incoming/email';
 import { detectOutgoingFields, outgoingAiHints, pickOutgoingFieldValue } from '../services/outgoing/fields';
 import { SharePointUploadService } from '../services/SharePointUploadService';
 import {
@@ -254,7 +255,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const requiredMissing = missingRequiredFields(fields);
     const markRequired = converted || showRequiredErrors;
     const percent = progress ? Math.max(0, Math.min(100, progress.percent)) / 100 : 0;
-    const currentPreview = pages.filter((page) => page.pageNumber === currentPage)[0];
+    const currentPreview = pages.length > 0 ? pages[Math.max(0, currentPage - 1)] : undefined;
     const pageFieldMarks = currentPreview
       ? fieldDebugMarks.filter((mark) => mark.pageNumber === currentPreview.pageNumber)
       : [];
@@ -1454,7 +1455,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _restyleCurrentPage = async (): Promise<void> => {
-    const page = this.state.pages.filter((item) => item.pageNumber === this.state.currentPage)[0];
+    const page = this.state.pages[Math.max(0, this.state.currentPage - 1)];
     const source = this._originalPdfBytes
       ? this._originalPdfBytes.slice()
       : this.state.file;
@@ -1694,6 +1695,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
 
     try {
+      const documentKind = correspondenceKindFromFileName(file.name);
       const result = await PdfOcrService.extractText(
         this._originalPdfBytes ? this._originalPdfBytes.slice() : file,
         'eng',
@@ -1710,15 +1712,20 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             pages: prev.pages.concat([page]),
             currentPage: page.pageNumber
           }));
-        }
+        },
+        documentKind === 'incoming'
+          ? createIncomingOcrDecider()
+          : undefined
       );
 
+      const previewPages = documentKind === 'incoming'
+        ? keepIncomingEmailPreviewPages(result.pages)
+        : result.pages;
       let filled: { fields: IFormField[]; info: string | undefined; warning?: string };
-      const documentKind = correspondenceKindFromFileName(file.name);
       this.setState({
         progress: {
-          page: result.pages.length,
-          totalPages: result.pages.length,
+          page: previewPages.length,
+          totalPages: previewPages.length,
           percent: 100,
           status: strings.ExtractingFields
         }
@@ -1729,12 +1736,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         filled = { fields: this.state.fields, info: undefined };
       }
       this.setState({
-        pages: result.pages,
+        pages: previewPages,
         currentPage: 1,
         isProcessing: false,
         progress: undefined,
         fields: filled.fields,
-        fieldDebugMarks: buildOcrFieldMarks(result.pages, filled.fields),
+        fieldDebugMarks: buildOcrFieldMarks(previewPages, filled.fields),
         error: undefined,
         info: filled.info,
         warning: filled.warning
