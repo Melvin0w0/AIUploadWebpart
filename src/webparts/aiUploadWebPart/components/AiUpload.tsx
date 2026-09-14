@@ -88,7 +88,7 @@ import {
   suggestionsFor,
   IFieldHistory
 } from '../services/fieldHistory';
-import { lookupLabelStaffFromNotificationSetup, lookupLeadingBlFromNotificationSetup, lookupNotificationSetupByProjectName } from '../services/notificationSetup';
+import { lookupLabelStaffFromNotificationSetup, lookupLeadingBlFromNotificationSetup, lookupNotificationSetupByProjectName, INotificationSetupLookup } from '../services/notificationSetup';
 import { generateLabelPagePng } from '../services/labelPage';
 import { appendLabelPageToPdf } from '../services/pdfLabelAppend';
 import { isDevToolsOpen, isSpfxServeDebug, subscribeDevToolsOpen } from '../services/spfxLocalDebug';
@@ -1115,17 +1115,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             ? (strings.NotificationSetupThresholdHint ||
               'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).')
             : undefined;
-          if (!result.leadingBl && !warning) {
+          if (!result.leadingBl && !result.projectNumber && !warning) {
             return;
           }
           this.setState((prev) => ({
-            fields: result.leadingBl
-              ? prev.fields.map((field) => (
-                isLeadingBlField(field.label)
-                  ? { ...field, value: canonicalLeadingBl(result.leadingBl), debugSource: 'Notification Set-up' }
-                  : field
-              ))
-              : prev.fields,
+            fields: this._applyNotificationSetupLookup(prev.fields, result),
             warning: warning || prev.warning
           }));
         })
@@ -1133,6 +1127,26 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           return;
         });
     }, 400);
+  };
+
+  private _applyNotificationSetupLookup = (fields: IFormField[], setup: INotificationSetupLookup): IFormField[] => {
+    return fields.map((field) => {
+      if (isProjectNumberField(field.label) && setup.projectNumber) {
+        return {
+          ...field,
+          value: this._normalizeFieldValue(field.label, setup.projectNumber),
+          debugSource: 'Notification Set-up'
+        };
+      }
+      if (isLeadingBlField(field.label) && setup.leadingBl) {
+        return {
+          ...field,
+          value: this._normalizeFieldValue(field.label, setup.leadingBl),
+          debugSource: 'Notification Set-up'
+        };
+      }
+      return field;
+    });
   };
 
   private _applyPdfFileName = (fields: IFormField[], fileName?: string): IFormField[] => {
@@ -1823,13 +1837,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
               this.props.currentWebUrl,
               projectNumber
             );
-            if (leading.leadingBl) {
-              fields = fields.map((field) => (
-                isLeadingBlField(field.label)
-                  ? { ...field, value: this._normalizeFieldValue(field.label, leading.leadingBl), debugSource: 'Notification Set-up' }
-                  : field
-              ));
-            }
+            fields = this._applyNotificationSetupLookup(fields, leading);
             if (leading.thresholdExceeded) {
               warning = strings.NotificationSetupThresholdHint ||
                 'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).';
@@ -1853,12 +1861,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             this.props.currentWebUrl,
             resolvedProjectNumber
           );
-          if (setup.leadingBl) {
-            fields = fields.map((field) => (
-              isLeadingBlField(field.label)
-                ? { ...field, value: this._normalizeFieldValue(field.label, setup.leadingBl), debugSource: 'Notification Set-up' }
-                : field
-            ));
+          if (setup.leadingBl || setup.projectNumber) {
+            fields = this._applyNotificationSetupLookup(fields, setup);
           }
           if (setup.thresholdExceeded) {
             warning = strings.NotificationSetupThresholdHint ||

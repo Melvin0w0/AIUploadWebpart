@@ -194,8 +194,14 @@ export async function lookupLeadingBlFromNotificationSetup(
         const leadingBl = item
           ? canonicalLeadingBl(readFieldText(item, resolved.columns.leadingBlInternal))
           : '';
-        if (leadingBl) {
-          return { leadingBl };
+        const projectNumber = item
+          ? sanitizeProjectNumber(
+            readFieldText(item, resolved.columns.namedProjectNumberInternal) ||
+            readFieldText(item, resolved.columns.projectNoInternal)
+          )
+          : '';
+        if (leadingBl || projectNumber) {
+          return { leadingBl, projectNumber };
         }
         if (item) {
           return { leadingBl: '' };
@@ -409,6 +415,9 @@ async function queryByCaml(
     `<FieldRef Name="ID"/>` +
     `<FieldRef Name="${columns.projectNoInternal}"/>` +
     `<FieldRef Name="${columns.leadingBlInternal}"/>` +
+    (columns.namedProjectNumberInternal && columns.namedProjectNumberInternal !== columns.projectNoInternal
+      ? `<FieldRef Name="${columns.namedProjectNumberInternal}"/>`
+      : '') +
     `</ViewFields>` +
     `<RowLimit>1</RowLimit>` +
     `</View>`;
@@ -448,6 +457,9 @@ async function queryByRestFilter(
     columns.projectNoInternal,
     isLookup ? `${columns.leadingBlInternal}/Title` : columns.leadingBlInternal
   ];
+  if (columns.namedProjectNumberInternal && columns.namedProjectNumberInternal !== columns.projectNoInternal) {
+    selectParts.push(columns.namedProjectNumberInternal);
+  }
   let url =
     `${trimSlash(siteUrl)}/_api/web/lists/GetByTitle('${escapeOData(listTitle)}')` +
     `/items?$filter=${encodeURIComponent(filter)}` +
