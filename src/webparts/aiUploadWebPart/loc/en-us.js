@@ -112,7 +112,7 @@ define([], function () {
     IncomingLabel: 'Incoming',
     OutgoingLabel: 'Outgoing',
     IncomingNoAutoFillHint: 'Incoming files are not auto-filled. Enter fields manually or highlight the PDF.',
-    IncomingProjectNumberDescription: 'From Your Ref, 8 digits before /.',
+    IncomingProjectNumberDescription: 'From Agreement No. or Contract No. below Dear, matched to Notification Set-up Project Name.',
     NotificationSetupThresholdHint: 'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).',
     UploadTypeLabel: 'Upload Type',
     UploadTypeNormal: 'Normal',

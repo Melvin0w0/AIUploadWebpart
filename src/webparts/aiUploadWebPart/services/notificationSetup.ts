@@ -4,9 +4,12 @@ import { sanitizeProjectNumber } from '../constants/projectNumber';
 
 export const NOTIFICATION_SETUP_LIST_TITLE: string = 'Notification Set-up';
 export const LEADING_BUSINESS_LINE_INTERNAL: string = 'Leading_x0020_Business_x0020_Lin';
+export const PROJECT_NAME_INTERNAL: string = 'Project_x0020_Name';
+export const NAMED_PROJECT_NUMBER_INTERNAL: string = 'Project_x0020_Number_x0020__x002';
 
 export interface INotificationSetupLookup {
   leadingBl: string;
+  projectNumber?: string;
   thresholdExceeded?: boolean;
 }
 
@@ -15,6 +18,10 @@ interface IListColumns {
   projectNoType: string;
   leadingBlInternal: string;
   leadingBlType: string;
+  projectNameInternal: string;
+  projectNameType: string;
+  namedProjectNumberInternal: string;
+  namedProjectNumberType: string;
 }
 
 interface IFieldMeta {
@@ -213,6 +220,62 @@ export async function lookupLeadingBlFromNotificationSetup(
   return { leadingBl: '' };
 }
 
+export async function lookupNotificationSetupByProjectName(
+  http: SPHttpClient,
+  siteUrl: string,
+  projectNameFragment: string
+): Promise<INotificationSetupLookup> {
+  const fragment = (projectNameFragment || '').replace(/\s+/g, ' ').trim();
+  if (!fragment || !siteUrl || !http) {
+    return { leadingBl: '' };
+  }
+
+  try {
+    const resolved = await resolveList(http, siteUrl);
+    if (!resolved || !resolved.columns.projectNameInternal) {
+      return { leadingBl: '' };
+    }
+
+    const candidates = projectNameCandidates(fragment);
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        const item = await queryMatchingItemByProjectName(
+          http,
+          resolved.siteUrl,
+          resolved.listTitle,
+          resolved.columns,
+          candidates[i]
+        );
+        if (!item) {
+          continue;
+        }
+        const projectNumber = sanitizeProjectNumber(
+          readFieldText(item, resolved.columns.namedProjectNumberInternal) ||
+          readFieldText(item, resolved.columns.projectNoInternal)
+        );
+        if (projectNumber) {
+          return { leadingBl: '', projectNumber };
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (isThresholdError(message)) {
+          return { leadingBl: '', thresholdExceeded: true };
+        }
+        if (i === candidates.length - 1) {
+          return { leadingBl: '' };
+        }
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (isThresholdError(message)) {
+      return { leadingBl: '', thresholdExceeded: true };
+    }
+  }
+
+  return { leadingBl: '' };
+}
+
 async function resolveList(
   http: SPHttpClient,
   siteUrl: string
@@ -265,6 +328,8 @@ async function readColumns(
 
   const projectField = pickProjectNoField(fields);
   const leadingField = pickLeadingBlField(fields);
+  const projectNameField = pickProjectNameField(fields);
+  const namedProjectNumberField = pickNamedProjectNumberField(fields) || projectField;
   if (!projectField || !projectField.InternalName) {
     throw new Error(`Could not find Project No on "${listTitle}".`);
   }
@@ -276,7 +341,15 @@ async function readColumns(
     projectNoInternal: String(projectField.InternalName),
     projectNoType: projectField.TypeAsString ? String(projectField.TypeAsString) : 'Text',
     leadingBlInternal: String(leadingField.InternalName),
-    leadingBlType: leadingField.TypeAsString ? String(leadingField.TypeAsString) : 'Text'
+    leadingBlType: leadingField.TypeAsString ? String(leadingField.TypeAsString) : 'Text',
+    projectNameInternal: projectNameField && projectNameField.InternalName ? String(projectNameField.InternalName) : '',
+    projectNameType: projectNameField && projectNameField.TypeAsString ? String(projectNameField.TypeAsString) : 'Text',
+    namedProjectNumberInternal: namedProjectNumberField && namedProjectNumberField.InternalName
+      ? String(namedProjectNumberField.InternalName)
+      : String(projectField.InternalName),
+    namedProjectNumberType: namedProjectNumberField && namedProjectNumberField.TypeAsString
+      ? String(namedProjectNumberField.TypeAsString)
+      : (projectField.TypeAsString ? String(projectField.TypeAsString) : 'Text')
   };
 }
 
@@ -297,6 +370,25 @@ async function queryMatchingItem(
   }
 
   return queryByRestFilter(http, siteUrl, listTitle, columns, projectNo);
+}
+
+async function queryMatchingItemByProjectName(
+  http: SPHttpClient,
+  siteUrl: string,
+  listTitle: string,
+  columns: IListColumns,
+  projectNameFragment: string
+): Promise<{ [key: string]: unknown } | undefined> {
+  try {
+    return await queryByProjectNameCaml(http, siteUrl, listTitle, columns, projectNameFragment);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (isThresholdError(message)) {
+      throw err;
+    }
+  }
+
+  return queryByProjectNameRestFilter(http, siteUrl, listTitle, columns, projectNameFragment);
 }
 
 async function queryByCaml(
@@ -374,6 +466,86 @@ async function queryByRestFilter(
   return firstItem(await response.json());
 }
 
+async function queryByProjectNameCaml(
+  http: SPHttpClient,
+  siteUrl: string,
+  listTitle: string,
+  columns: IListColumns,
+  projectNameFragment: string
+): Promise<{ [key: string]: unknown } | undefined> {
+  const viewXml =
+    `<View Scope="RecursiveAll">` +
+    `<Query><Where><Contains>` +
+    `<FieldRef Name="${columns.projectNameInternal}"/>` +
+    `<Value Type="Text">${escapeXml(projectNameFragment)}</Value>` +
+    `</Contains></Where></Query>` +
+    `<ViewFields>` +
+    `<FieldRef Name="ID"/>` +
+    `<FieldRef Name="${columns.projectNameInternal}"/>` +
+    `<FieldRef Name="${columns.leadingBlInternal}"/>` +
+    `<FieldRef Name="${columns.namedProjectNumberInternal}"/>` +
+    (columns.namedProjectNumberInternal !== columns.projectNoInternal
+      ? `<FieldRef Name="${columns.projectNoInternal}"/>`
+      : '') +
+    `</ViewFields>` +
+    `<RowLimit>1</RowLimit>` +
+    `</View>`;
+
+  const url =
+    `${trimSlash(siteUrl)}/_api/web/lists/GetByTitle('${escapeOData(listTitle)}')/GetItems`;
+  const response = await http.post(url, SPHttpClient.configurations.v1, {
+    headers: {
+      Accept: 'application/json;odata=nometadata',
+      'Content-Type': 'application/json;odata=verbose',
+      'odata-version': '3.0'
+    },
+    body: JSON.stringify({
+      query: {
+        __metadata: { type: 'SP.CamlQuery' },
+        ViewXml: viewXml
+      }
+    })
+  });
+  await ensureOk(response, `Could not query "${listTitle}".`);
+  return firstItem(await response.json());
+}
+
+async function queryByProjectNameRestFilter(
+  http: SPHttpClient,
+  siteUrl: string,
+  listTitle: string,
+  columns: IListColumns,
+  projectNameFragment: string
+): Promise<{ [key: string]: unknown } | undefined> {
+  const filter = `substringof('${escapeOData(projectNameFragment)}', ${columns.projectNameInternal})`;
+  const isLookup = isLookupType(columns.leadingBlType);
+  const selectParts: string[] = [
+    'Id',
+    columns.projectNameInternal,
+    columns.namedProjectNumberInternal,
+    isLookup ? `${columns.leadingBlInternal}/Title` : columns.leadingBlInternal
+  ];
+  if (columns.namedProjectNumberInternal !== columns.projectNoInternal) {
+    selectParts.push(columns.projectNoInternal);
+  }
+  let url =
+    `${trimSlash(siteUrl)}/_api/web/lists/GetByTitle('${escapeOData(listTitle)}')` +
+    `/items?$filter=${encodeURIComponent(filter)}` +
+    `&$select=${selectParts.join(',')}` +
+    `&$top=1`;
+  if (isLookup) {
+    url += `&$expand=${columns.leadingBlInternal}`;
+  }
+
+  const response = await http.get(url, SPHttpClient.configurations.v1, {
+    headers: {
+      Accept: 'application/json;odata=nometadata'
+    }
+  });
+  await ensureOk(response, `Could not query "${listTitle}".`);
+  return firstItem(await response.json());
+}
+
 function firstItem(json: {
   value?: { [key: string]: unknown }[];
   d?: { results?: { [key: string]: unknown }[] };
@@ -410,6 +582,35 @@ function pickLeadingBlField(fields: IFieldMeta[]): IFieldMeta | undefined {
   return fields.filter((field) =>
     /leading\s*business\s*lin/.test(String(field.Title || '').toLowerCase())
   )[0];
+}
+
+function pickProjectNameField(fields: IFieldMeta[]): IFieldMeta | undefined {
+  const byInternal = fields.filter((field) =>
+    String(field.InternalName || '').toLowerCase() === PROJECT_NAME_INTERNAL.toLowerCase()
+  )[0];
+  if (byInternal) {
+    return byInternal;
+  }
+  return fields.filter((field) => normalizeLabel(String(field.Title || '')) === 'project name')[0];
+}
+
+function pickNamedProjectNumberField(fields: IFieldMeta[]): IFieldMeta | undefined {
+  const exact = fields.filter((field) =>
+    String(field.InternalName || '').toLowerCase() === NAMED_PROJECT_NUMBER_INTERNAL.toLowerCase()
+  )[0];
+  if (exact) {
+    return exact;
+  }
+  const prefixed = fields.filter((field) =>
+    String(field.InternalName || '').toLowerCase().indexOf('project_x0020_number_x0020_') === 0
+  )[0];
+  if (prefixed) {
+    return prefixed;
+  }
+  return fields.filter((field) => {
+    const title = normalizeLabel(String(field.Title || ''));
+    return title === 'project number' || title.indexOf('project number') === 0;
+  })[0];
 }
 
 function isProjectNoColumn(title: string, internal: string): boolean {
@@ -486,6 +687,20 @@ function projectNumberCandidates(projectNo: string): string[] {
   }
   const unpadded = projectNo.replace(/^0+/, '') || '0';
   push(unpadded);
+  return results;
+}
+
+function projectNameCandidates(fragment: string): string[] {
+  const results: string[] = [];
+  const push = (value: string): void => {
+    const text = (value || '').replace(/\s+/g, ' ').trim();
+    if (text && text.length >= 4 && /\d/.test(text) && results.indexOf(text) < 0) {
+      results.push(text);
+    }
+  };
+  push(fragment);
+  push(fragment.replace(/\s*\([^)]*\)\s*$/, ''));
+  push(fragment.replace(/\s*\/\s*/g, '/').replace(/\s*-\s*/g, '-'));
   return results;
 }
 

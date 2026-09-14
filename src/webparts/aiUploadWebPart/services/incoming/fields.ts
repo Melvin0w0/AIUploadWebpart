@@ -1,20 +1,20 @@
 // Incoming Convert rules only. Outgoing lives in services/outgoing/.
 import { isOrganizationField, isReceiverField, isRefNoField, isSenderField, isSubjectField } from '../../constants/defaultFormFields';
 import { isIssueDateField } from '../../constants/issueDate';
-import { isProjectNumberField, sanitizeProjectNumber } from '../../constants/projectNumber';
+import { isProjectNumberField } from '../../constants/projectNumber';
 import { IAiExtractionHints, IDetectedFields, IPickedValue, emptyDetectedFields, picked, tryPicked, tryText, tryTextAsync } from '../correspondenceTypes';
 import { extractOurRefNo, extractYourRefNo } from '../fieldExtractor';
 import { IOcrPageResult } from '../IPdfOcr';
 import { analyzeDocumentSignature, extractSubjectBelowDearSir, subjectAppearsInPage } from '../signatureSender';
 import {
   classifyIncomingLetter,
+  extractIncomingAgreementNo,
   extractIncomingIssueDate,
   extractIncomingMemoSender,
   extractIncomingOrganizationLocated,
   extractIncomingReceiverLocated,
   extractIncomingSenderLocated,
   extractIncomingSubject,
-  incomingProjectNumber,
   incomingSenderName,
   incomingSignatureParenName
 } from './extract';
@@ -47,9 +47,9 @@ export async function detectIncomingFields(pages: IOcrPageResult[]): Promise<IDe
   if (detected.yourRef) {
     detected.sources.yourRef = 'Your Ref';
   }
-  detected.projectNumber = tryText(() => incomingProjectNumber(list));
-  if (detected.projectNumber) {
-    detected.sources.projectNumber = 'Your Ref';
+  detected.agreementNo = tryText(() => extractIncomingAgreementNo(firstPage));
+  if (detected.agreementNo) {
+    detected.sources.agreementNo = 'Agreement / Contract No.';
   }
   detected.issueDate = tryText(() => extractIncomingIssueDate(list));
   if (detected.issueDate) {
@@ -104,14 +104,7 @@ export function pickIncomingFieldValue(
     return picked((aiValue || '').trim(), 'AI');
   }
   if (isProjectNumberField(label)) {
-    if (detected.projectNumber) {
-      return picked(detected.projectNumber, detected.sources.projectNumber || 'Your Ref');
-    }
-    const fromAi = sanitizeProjectNumber(aiValue || '');
-    if (fromAi) {
-      return picked(fromAi, 'AI');
-    }
-    return picked(keywordValue || '', '關鍵字');
+    return picked('', '');
   }
   if (isOrganizationField(label)) {
     return picked(detected.organization, detected.sources.organization);
@@ -139,6 +132,7 @@ export function incomingAiHints(detected: IDetectedFields): IAiExtractionHints {
     subjectText: detected.subjectText,
     refNo: detected.refNo,
     yourRef: detected.yourRef,
+    agreementNo: detected.agreementNo,
     organization: detected.organization,
     kind: 'incoming',
     letterType: detected.letterType

@@ -88,7 +88,7 @@ import {
   suggestionsFor,
   IFieldHistory
 } from '../services/fieldHistory';
-import { lookupLabelStaffFromNotificationSetup, lookupLeadingBlFromNotificationSetup } from '../services/notificationSetup';
+import { lookupLabelStaffFromNotificationSetup, lookupLeadingBlFromNotificationSetup, lookupNotificationSetupByProjectName } from '../services/notificationSetup';
 import { generateLabelPagePng } from '../services/labelPage';
 import { appendLabelPageToPdf } from '../services/pdfLabelAppend';
 import { isDevToolsOpen, isSpfxServeDebug, subscribeDevToolsOpen } from '../services/spfxLocalDebug';
@@ -535,7 +535,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                                 ? strings.RegistrationNumberDescription
                                 : isProjectNumberField(field.label)
                                   ? (documentKind === 'incoming'
-                                    ? (strings.IncomingProjectNumberDescription || 'From Your Ref, 8 digits before /.')
+                                    ? (strings.IncomingProjectNumberDescription || 'From Agreement No. or Contract No. below Dear, matched to Notification Set-up Project Name.')
                                     : strings.ProjectNumberDescription)
                                   : undefined
                           }
@@ -1798,28 +1798,75 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     }
 
     let warning: string | undefined;
-    const projectField = fields.filter((field) => isProjectNumberField(field.label))[0];
-    const resolvedProjectNumber = projectField ? sanitizeProjectNumber(projectField.value) : '';
-    if (resolvedProjectNumber) {
-      try {
-        const setup = await lookupLeadingBlFromNotificationSetup(
-          this.props.spHttpClient,
-          this.props.currentWebUrl,
-          resolvedProjectNumber
-        );
-        if (setup.leadingBl) {
-          fields = fields.map((field) => (
-            isLeadingBlField(field.label)
-              ? { ...field, value: this._normalizeFieldValue(field.label, setup.leadingBl), debugSource: 'Notification Set-up' }
-              : field
-          ));
+    if (incoming) {
+      const agreementNo = detected.agreementNo || '';
+      if (agreementNo) {
+        try {
+          const setup = await lookupNotificationSetupByProjectName(
+            this.props.spHttpClient,
+            this.props.currentWebUrl,
+            agreementNo
+          );
+          if (setup.projectNumber) {
+            const projectNumber = sanitizeProjectNumber(setup.projectNumber);
+            fields = fields.map((field) => (
+              isProjectNumberField(field.label)
+                ? {
+                  ...field,
+                  value: this._normalizeFieldValue(field.label, projectNumber),
+                  debugSource: 'Notification Set-up'
+                }
+                : field
+            ));
+            const leading = await lookupLeadingBlFromNotificationSetup(
+              this.props.spHttpClient,
+              this.props.currentWebUrl,
+              projectNumber
+            );
+            if (leading.leadingBl) {
+              fields = fields.map((field) => (
+                isLeadingBlField(field.label)
+                  ? { ...field, value: this._normalizeFieldValue(field.label, leading.leadingBl), debugSource: 'Notification Set-up' }
+                  : field
+              ));
+            }
+            if (leading.thresholdExceeded) {
+              warning = strings.NotificationSetupThresholdHint ||
+                'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).';
+            }
+          }
+          if (setup.thresholdExceeded) {
+            warning = strings.NotificationSetupThresholdHint ||
+              'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).';
+          }
+        } catch {
+          warning = undefined;
         }
-        if (setup.thresholdExceeded) {
-          warning = strings.NotificationSetupThresholdHint ||
-            'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).';
+      }
+    } else {
+      const projectField = fields.filter((field) => isProjectNumberField(field.label))[0];
+      const resolvedProjectNumber = projectField ? sanitizeProjectNumber(projectField.value) : '';
+      if (resolvedProjectNumber) {
+        try {
+          const setup = await lookupLeadingBlFromNotificationSetup(
+            this.props.spHttpClient,
+            this.props.currentWebUrl,
+            resolvedProjectNumber
+          );
+          if (setup.leadingBl) {
+            fields = fields.map((field) => (
+              isLeadingBlField(field.label)
+                ? { ...field, value: this._normalizeFieldValue(field.label, setup.leadingBl), debugSource: 'Notification Set-up' }
+                : field
+            ));
+          }
+          if (setup.thresholdExceeded) {
+            warning = strings.NotificationSetupThresholdHint ||
+              'Could not read Leading BL from "Notification Set-up". Index the Project No column (this list has more than 5,000 items).';
+          }
+        } catch {
+          warning = undefined;
         }
-      } catch {
-        warning = undefined;
       }
     }
 

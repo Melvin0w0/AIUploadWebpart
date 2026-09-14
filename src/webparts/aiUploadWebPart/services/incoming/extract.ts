@@ -1,8 +1,6 @@
 // Incoming OCR locators only. Outgoing lives in services/outgoing/.
 import { formatIssueDate, parseIssueDate } from '../../constants/issueDate';
-import { projectNumberFromRef } from '../../constants/projectNumber';
 import { IPickedValue, picked } from '../correspondenceTypes';
-import { extractYourRefNo } from '../fieldExtractor';
 import { IOcrPageResult, IOcrWord } from '../IPdfOcr';
 import { formatOcrTextWithStyles, joinOcrWords } from '../ocrSelection';
 import { SUBJECT } from '../ocrWordStyles';
@@ -51,9 +49,43 @@ export function classifyIncomingLetter(page?: IOcrPageResult): IIncomingClassifi
   return { letterType, language, hasOurRef, hasYourRef };
 }
 
-export function incomingProjectNumber(pages: IOcrPageResult[]): string {
-  const yourRef = extractYourRefNo(pages || []);
-  return projectNumberFromRef(yourRef) || eightDigitRun(yourRef);
+export function extractIncomingAgreementNo(page?: IOcrPageResult): string {
+  if (!page) {
+    return '';
+  }
+  const lines = groupWordsIntoLines(page.words || []);
+  const texts = lines.map((line) => stripIncomingMarkup(line.text).replace(/\s+/g, ' ').trim());
+  const dearIndex = findIncomingSalutationIndex(texts);
+  const start = dearIndex >= 0 ? dearIndex + 1 : 0;
+  const end = findIncomingAgreementBandEnd(lines, texts, start);
+  const band: string[] = [];
+  if (dearIndex >= 0) {
+    const afterDear = textAfterIncomingSalutation(texts[dearIndex]);
+    if (afterDear) {
+      band.push(afterDear);
+    }
+  }
+  for (let index = start; index < end; index++) {
+    const text = texts[index];
+    if (!text || isIncomingDeliveryLine(text) || isIncomingMetaHeader(text) || isIncomingSalutation(text)) {
+      continue;
+    }
+    band.push(text);
+  }
+  for (let index = 0; index < band.length; index++) {
+    const fromLabel = valueAfterIncomingAgreementLabel(band[index]);
+    if (fromLabel && fromLabel.value) {
+      return cleanIncomingAgreementValue(fromLabel.value);
+    }
+    if (fromLabel && !fromLabel.value) {
+      const next = band[index + 1] || '';
+      if (next && !isIncomingSubjectLabelLine(next) && !isIncomingSubjectBodyStart(next)) {
+        return cleanIncomingAgreementValue(next);
+      }
+    }
+  }
+  const joined = valueAfterIncomingAgreementLabel(band.join(' '));
+  return joined && joined.value ? cleanIncomingAgreementValue(joined.value) : '';
 }
 
 export function extractIncomingOrganization(page?: IOcrPageResult): string {
@@ -729,6 +761,66 @@ function dropLetterheadFromAddress(cluster: string[], page: IOcrPageResult): str
   return lines[0] || '';
 }
 
+function findIncomingAgreementBandEnd(lines: ILine[], texts: string[], start: number): number {
+  for (let index = start; index < texts.length; index++) {
+    const text = texts[index];
+    if (!text) {
+      continue;
+    }
+    if (isIncomingYoursClosingPhrase(text) || isIncomingOtherClosingPhrase(text)) {
+      return index;
+    }
+    if (isIncomingSubjectLabelLine(text) || isIncomingSubjectBodyStart(text)) {
+      return index;
+    }
+    if (incomingLineHasBoldAndUnderline(lines[index]) && !isIncomingAgreementLabelLine(text)) {
+      return index;
+    }
+  }
+  return texts.length;
+}
+
+function textAfterIncomingSalutation(line: string): string {
+  const trimmed = (line || '').replace(/\s+/g, ' ').trim();
+  const stripped = trimmed
+    .replace(/^dear\s+(s[il1]rs?|madams?|mesdames|sir\s*[/\\]?\s*madam)\b[, ]*/i, '')
+    .replace(/^(敬啟者|敬启者|鈞鑒|台鑒)[：:\s]*/, '');
+  return stripped === trimmed ? '' : stripped.replace(/^[,.，。\s]+/, '').trim();
+}
+
+function valueAfterIncomingAgreementLabel(line: string): { found: boolean; value: string } | undefined {
+  const text = (line || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return undefined;
+  }
+  const match = text.match(
+    /(?:agreement\s*(?:no\.?|number)|contract\s*(?:no\.?|number)|agmt\.?\s*no\.?|agt\.?\s*no\.?|合約編號|合同編號|協議編號|协议编号|合約號碼|合同号码)\s*[:.\-\uFF1A]?\s*(.*)$/i
+  );
+  if (!match) {
+    return undefined;
+  }
+  return { found: true, value: (match[1] || '').trim() };
+}
+
+function isIncomingAgreementLabelLine(line: string): boolean {
+  return !!valueAfterIncomingAgreementLabel(line);
+}
+
+function isIncomingSubjectLabelLine(line: string): boolean {
+  return /^(re|subject|主旨|事由|關於|关于)\s*[:.-\uFF1A]/i.test((line || '').replace(/\s+/g, ' ').trim());
+}
+
+function cleanIncomingAgreementValue(value: string): string {
+  const text = (value || '')
+    .replace(/[;；]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.length < 4 || !/\d/.test(text)) {
+    return '';
+  }
+  return text.length > 80 ? text.substring(0, 80).trim() : text;
+}
+
 function findIncomingSalutationIndex(lines: string[]): number {
   for (let index = 0; index < lines.length; index++) {
     if (isIncomingSalutation(lines[index])) {
@@ -1374,11 +1466,6 @@ function cleanIncomingSenderName(value: string): string {
     return '';
   }
   return text;
-}
-
-function eightDigitRun(value: string): string {
-  const match = (value || '').match(/\d{8}/);
-  return match ? match[0] : '';
 }
 
 function pageText(page?: IOcrPageResult): string {
