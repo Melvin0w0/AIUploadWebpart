@@ -43,6 +43,25 @@ export function canonicalUploadTypeForProjectNumber(value: string, projectNumber
   return uploadType;
 }
 
+export function uploadTypeFromFolderName(name: string): UploadType | undefined {
+  const key = (name || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  if (key === 'confidentialinvoice') {
+    return UPLOAD_TYPE_CONFIDENTIAL_INVOICE;
+  }
+  if (key === 'confidentialmisc') {
+    return UPLOAD_TYPE_CONFIDENTIAL_MISC;
+  }
+  return undefined;
+}
+
+export function constrainUploadType(value: string, available: UploadType[]): UploadType {
+  const uploadType = canonicalUploadType(value);
+  if (available.indexOf(uploadType) >= 0) {
+    return uploadType;
+  }
+  return available.length > 0 ? available[0] : UPLOAD_TYPE_NORMAL;
+}
+
 export function confidentialFolderForUploadType(uploadType: UploadType): string {
   if (uploadType === UPLOAD_TYPE_CONFIDENTIAL_INVOICE) {
     return CONFIDENTIAL_INVOICE_FOLDER;

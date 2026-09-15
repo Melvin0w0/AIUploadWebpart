@@ -61,6 +61,7 @@ import {
 } from '../constants/yesNo';
 import {
   canonicalUploadTypeForProjectNumber,
+  constrainUploadType,
   UploadType,
   UPLOAD_TYPE_NORMAL,
   uploadTypeOptionsForProjectNumber
@@ -82,6 +83,7 @@ import {
   fileNameFromFields,
   resolveUploadDestination
 } from '../services/uploadDestination';
+import { correspondenceFolderName, lookupProjectUploadTypes } from '../services/projectUploadFolders';
 import {
   rememberFieldValue,
   rememberFieldValues,
@@ -132,6 +134,7 @@ interface IAiUploadState {
   labelType: LabelType;
   incomingLetterType: string;
   dearToSubjectText: string;
+  projectUploadTypes: UploadType[];
 }
 
 interface IChoiceOption {
@@ -278,6 +281,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _leadingBlLookupTimer: number | undefined;
   private _eoiLookupSeq: number = 0;
   private _eoiLookupTimer: number | undefined;
+  private _uploadFolderLookupSeq: number = 0;
+  private _uploadFolderLookupTimer: number | undefined;
   private _stopDevToolsWatch: (() => void) | undefined;
   private _restyleSeq: number;
 
@@ -291,6 +296,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._leadingBlLookupTimer = undefined;
     this._eoiLookupSeq = 0;
     this._eoiLookupTimer = undefined;
+    this._uploadFolderLookupSeq = 0;
+    this._uploadFolderLookupTimer = undefined;
     this._stopDevToolsWatch = undefined;
     this._restyleSeq = 0;
     const fields = this._fieldsFromConfig(props.formFields);
@@ -322,7 +329,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadType: UPLOAD_TYPE_NORMAL,
       labelType: LABEL_TYPE_NORMAL,
       incomingLetterType: '',
-      dearToSubjectText: ''
+      dearToSubjectText: '',
+      projectUploadTypes: []
     };
   }
 
@@ -358,8 +366,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (this._eoiLookupTimer !== undefined) {
       window.clearTimeout(this._eoiLookupTimer);
     }
+    if (this._uploadFolderLookupTimer !== undefined) {
+      window.clearTimeout(this._uploadFolderLookupTimer);
+    }
     this._leadingBlLookupSeq = this._leadingBlLookupSeq + 1;
     this._eoiLookupSeq = this._eoiLookupSeq + 1;
+    this._uploadFolderLookupSeq = this._uploadFolderLookupSeq + 1;
     this._restyleSeq = this._restyleSeq + 1;
     this._revokePageUrls(this.state.pages);
     if (this._stopDevToolsWatch) {
@@ -396,7 +408,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadType,
       labelType,
       incomingLetterType,
-      dearToSubjectText
+      dearToSubjectText,
+      projectUploadTypes
     } = this.state;
     const busy = isProcessing || isUploading || isRestyling;
     const converted = pages.length > 0 && !isProcessing;
@@ -417,7 +430,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const hasFieldValues = fields.some((field) => field.value.length > 0);
     const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
     const projectNumber = this._namedValue(fields, isProjectNumberField);
-    const resolvedUploadType = canonicalUploadTypeForProjectNumber(uploadType, projectNumber);
+    const availableUploadTypes = projectUploadTypes.length > 0
+      ? projectUploadTypes
+      : uploadTypeOptionsForProjectNumber(projectNumber).map((option) => option.key);
+    const resolvedUploadType = constrainUploadType(uploadType, availableUploadTypes);
     const destination = resolveUploadDestination(fields, {
       tenantUrl: this.props.tenantUrl,
       libraryName: this.props.libraryName,
@@ -831,9 +847,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                 {this._renderChoiceGroup(
                   strings.UploadTypeLabel || 'Upload Type',
                   resolvedUploadType,
-                  uploadTypeOptionsForProjectNumber(projectNumber).map((option) => ({
-                    key: option.key,
-                    text: this._uploadTypeLabel(option.key)
+                  availableUploadTypes.map((key) => ({
+                    key,
+                    text: this._uploadTypeLabel(key)
                   })),
                   (key) => this._onUploadTypeChange(key),
                   busy,
@@ -1279,23 +1295,25 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         };
       });
       const nextFields = this._syncRegistrationFromName(fields);
+      const nextProjectNumber = this._namedValue(nextFields, isProjectNumberField);
       return {
         fields: nextFields,
-        uploadType: canonicalUploadTypeForProjectNumber(
-          prev.uploadType,
-          this._namedValue(nextFields, isProjectNumberField)
-        ),
+        uploadType: canonicalUploadTypeForProjectNumber(prev.uploadType, nextProjectNumber),
         activeFieldId: fieldId,
         showRequiredErrors: false,
         error: undefined
       };
+    }, () => {
+      if (target && isProjectNumberField(target.label)) {
+        this._refreshLeadingBlFromNotificationSetup(this._normalizeFieldValue(target.label, value));
+      }
+      if (target && isLeadingBlField(target.label) && this.state.incomingLetterType === 'email') {
+        this._refreshEmailEoiProjectNumber(this._normalizeFieldValue(target.label, value));
+      }
+      if (target && (isProjectNumberField(target.label) || isLeadingBlField(target.label))) {
+        this._refreshProjectUploadTypes();
+      }
     });
-    if (target && isProjectNumberField(target.label)) {
-      this._refreshLeadingBlFromNotificationSetup(this._normalizeFieldValue(target.label, value));
-    }
-    if (target && isLeadingBlField(target.label) && this.state.incomingLetterType === 'email') {
-      this._refreshEmailEoiProjectNumber(this._normalizeFieldValue(target.label, value));
-    }
   };
 
   private _refreshLeadingBlFromNotificationSetup = (projectNumber: string): void => {
@@ -1332,7 +1350,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           this.setState((prev) => ({
             fields: this._applyNotificationSetupLookup(prev.fields, result),
             warning: warning || prev.warning
-          }));
+          }), () => {
+            this._refreshProjectUploadTypes();
+          });
         })
         .catch(() => {
           return;
@@ -1386,7 +1406,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         this.setState((prev) => ({
           fields: this._setEmailEoiProjectNumber(prev.fields, projectNumber),
           uploadType: canonicalUploadTypeForProjectNumber(prev.uploadType, projectNumber)
-        }));
+        }), () => {
+          this._refreshProjectUploadTypes();
+        });
       }).catch(() => {
         return;
       });
@@ -1579,10 +1601,58 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _onUploadTypeChange = (value: string): void => {
-    const projectNumber = this._namedValue(this.state.fields, isProjectNumberField);
+    const available = this.state.projectUploadTypes.length > 0
+      ? this.state.projectUploadTypes
+      : uploadTypeOptionsForProjectNumber(this._namedValue(this.state.fields, isProjectNumberField)).map((option) => option.key);
     this.setState({
-      uploadType: canonicalUploadTypeForProjectNumber(value, projectNumber)
+      uploadType: constrainUploadType(value, available)
     });
+  };
+
+  private _refreshProjectUploadTypes = (fields?: IFormField[]): void => {
+    const file = this.state.file;
+    const list = fields || this.state.fields;
+    const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
+    const projectDest = resolveUploadDestination(list, {
+      tenantUrl: this.props.tenantUrl,
+      libraryName: this.props.libraryName,
+      folderPathTemplate: this.props.folderPathTemplate,
+      uploadType: UPLOAD_TYPE_NORMAL,
+      correspondenceKind: 'unknown'
+    });
+    const folderName = correspondenceFolderName(documentKind);
+    if (!projectDest.siteUrl || !projectDest.folderPath || !folderName) {
+      this.setState({ projectUploadTypes: [] });
+      return;
+    }
+    if (this._uploadFolderLookupTimer) {
+      window.clearTimeout(this._uploadFolderLookupTimer);
+    }
+    this._uploadFolderLookupSeq = this._uploadFolderLookupSeq + 1;
+    const seq = this._uploadFolderLookupSeq;
+    this._uploadFolderLookupTimer = window.setTimeout(() => {
+      this._uploadFolderLookupTimer = undefined;
+      lookupProjectUploadTypes(
+        this.props.spHttpClient,
+        projectDest.siteUrl,
+        projectDest.libraryName,
+        projectDest.folderPath,
+        folderName
+      ).then((types) => {
+        if (seq !== this._uploadFolderLookupSeq) {
+          return;
+        }
+        this.setState((prev) => ({
+          projectUploadTypes: types,
+          uploadType: constrainUploadType(prev.uploadType, types)
+        }));
+      }).catch(() => {
+        if (seq !== this._uploadFolderLookupSeq) {
+          return;
+        }
+        this.setState({ projectUploadTypes: [] });
+      });
+    }, 300);
   };
 
   private _labelTypeLabel = (labelType: LabelType): string => {
@@ -1698,7 +1768,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fields: this._fieldsForSelectedFile(this.state.fields, selected.name),
       showRequiredErrors: false,
       incomingLetterType: '',
-      dearToSubjectText: ''
+      dearToSubjectText: '',
+      projectUploadTypes: []
+    }, () => {
+      this._refreshProjectUploadTypes();
     });
   };
 
@@ -1812,7 +1885,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     }
 
     const projectNumber = this._namedValue(fields, isProjectNumberField);
-    const resolvedUploadType = canonicalUploadTypeForProjectNumber(this.state.uploadType, projectNumber);
+    const available = this.state.projectUploadTypes.length > 0
+      ? this.state.projectUploadTypes
+      : uploadTypeOptionsForProjectNumber(projectNumber).map((option) => option.key);
+    const resolvedUploadType = constrainUploadType(this.state.uploadType, available);
     const destination = resolveUploadDestination(fields, {
       tenantUrl: this.props.tenantUrl,
       libraryName: this.props.libraryName,
@@ -2025,6 +2101,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           this.state.uploadType,
           this._namedValue(filled.fields, isProjectNumberField)
         )
+      }, () => {
+        this._refreshProjectUploadTypes(filled.fields);
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
@@ -2257,7 +2335,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       uploadType: UPLOAD_TYPE_NORMAL,
       labelType: LABEL_TYPE_NORMAL,
       incomingLetterType: '',
-      dearToSubjectText: ''
+      dearToSubjectText: '',
+      projectUploadTypes: []
     });
   };
 
