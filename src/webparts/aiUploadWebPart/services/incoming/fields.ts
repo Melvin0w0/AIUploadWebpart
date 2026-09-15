@@ -10,8 +10,8 @@ import {
   extractIncomingEmailCcFromLastPage,
   extractIncomingEmailHeaders,
   extractIncomingEmailOurRef,
+  extractIncomingEmailReceiverFromLastPage,
   extractIncomingEmailSubjectFromLastPage,
-  extractIncomingEmailToFromLastPage,
   incomingLastEmailPages,
   incomingPagesLookLikeEmail
 } from './email';
@@ -107,9 +107,9 @@ async function detectIncomingEmailFields(pages: IOcrPageResult[]): Promise<IDete
   detected.letterType = 'email';
   const email = extractIncomingEmailHeaders(list);
   detected.signature = await analyzeDocumentSignature(workPages);
-  const emailTo = extractIncomingEmailToFromLastPage(list);
-  detected.receiverName = emailTo;
-  detected.sources.receiver = emailTo ? 'Email To' : '';
+  const emailReceiver = extractIncomingEmailReceiverFromLastPage(list);
+  detected.receiverName = emailReceiver.value;
+  detected.sources.receiver = emailReceiver.source;
   const organization = tryPicked(() => extractIncomingOrganizationLocated(firstPage));
   detected.organization = organization.value;
   detected.sources.organization = organization.source;

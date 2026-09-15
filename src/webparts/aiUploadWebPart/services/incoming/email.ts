@@ -127,6 +127,17 @@ export function extractIncomingEmailToFromLastPage(pages?: IOcrPageResult[]): st
   return extractHeaderFromLastEmailPage(pages, 'to');
 }
 
+export function extractIncomingEmailReceiverFromLastPage(pages?: IOcrPageResult[]): { value: string; source: string } {
+  const regardsName = extractIncomingEmailRegardsName(pages);
+  const ccNames = extractIncomingEmailCcNamesFromLastPage(pages);
+  const matched = matchIncomingEmailNameInList(regardsName, ccNames);
+  if (matched) {
+    return { value: matched, source: 'Email CC (Regards)' };
+  }
+  const emailTo = extractIncomingEmailToFromLastPage(pages);
+  return { value: emailTo, source: emailTo ? 'Email To' : '' };
+}
+
 export function extractIncomingEmailSubjectFromLastPage(pages?: IOcrPageResult[]): string {
   const list = pages || [];
   const lastIndex = lastIncomingEmailFormatPageIndex(list);
@@ -251,6 +262,189 @@ function headerFromLastEmailInText(text: string, kind: 'to' | 'cc'): string {
   const headers = incomingEmailHeaderBlock(lastSlice);
   const value = extractIncomingEmailHeaderValue(headers, kind);
   return kind === 'cc' ? incomingEmailCcSenderName(value) : incomingEmailPersonName(value);
+}
+
+function lastEmailSliceText(pages: IOcrPageResult[] | undefined): string {
+  const list = pages || [];
+  const lastIndex = lastIncomingEmailFormatPageIndex(list);
+  if (lastIndex < 0) {
+    return sliceLastIncomingEmail(clipEmailBeforeLetter(incomingEmailPagesPlainText(list)));
+  }
+  const pageText = incomingEmailPlainText(list[lastIndex]);
+  const fromPage = sliceLastIncomingEmail(clipEmailBeforeLetter(pageText));
+  if (lastIndex === 0) {
+    return fromPage;
+  }
+  const joined = (incomingEmailPlainText(list[lastIndex - 1]) + ' ' + pageText).replace(/\s+/g, ' ').trim();
+  return sliceLastIncomingEmail(clipEmailBeforeLetter(joined)) || fromPage;
+}
+
+function lastEmailRawHeader(pages: IOcrPageResult[] | undefined, kind: 'to' | 'cc'): string {
+  const list = pages || [];
+  const lastIndex = lastIncomingEmailFormatPageIndex(list);
+  if (lastIndex < 0) {
+    return extractIncomingEmailHeaderValue(
+      incomingEmailHeaderBlock(sliceLastIncomingEmail(clipEmailBeforeLetter(incomingEmailPagesPlainText(list)))),
+      kind
+    );
+  }
+  const pageText = incomingEmailPlainText(list[lastIndex]);
+  const fromPage = extractIncomingEmailHeaderValue(
+    incomingEmailHeaderBlock(sliceLastIncomingEmail(clipEmailBeforeLetter(pageText))),
+    kind
+  );
+  if (fromPage) {
+    return fromPage;
+  }
+  if (lastIndex === 0) {
+    return '';
+  }
+  const joined = (incomingEmailPlainText(list[lastIndex - 1]) + ' ' + pageText).replace(/\s+/g, ' ').trim();
+  return extractIncomingEmailHeaderValue(
+    incomingEmailHeaderBlock(sliceLastIncomingEmail(clipEmailBeforeLetter(joined))),
+    kind
+  );
+}
+
+function extractIncomingEmailCcNamesFromLastPage(pages?: IOcrPageResult[]): string[] {
+  return incomingEmailRecipientList(lastEmailRawHeader(pages, 'cc'));
+}
+
+function extractIncomingEmailRegardsName(pages?: IOcrPageResult[]): string {
+  const source = lastEmailSliceText(pages);
+  if (!source) {
+    return '';
+  }
+  const pattern = /(?:^|\s)(?:(?:best|kind|warm|many)\s+)?regards?\b|此致|祝好|順祝|顺祝/ig;
+  let last: RegExpExecArray | null = null;
+  let match = pattern.exec(source);
+  while (match) {
+    last = match;
+    match = pattern.exec(source);
+  }
+  if (!last || last.index === undefined) {
+    return '';
+  }
+  let rest = source.substring(last.index + last[0].length).replace(/^[,.，。:：\s]+/, '');
+  const stop = rest.search(
+    /(?:^|\s)(?:from|sent|to|cc|subject|attachments?|tel|fax|email|phone|mobile)\s*[:：]|original\s+message|forwarded\s+message|\byours\b|\bdear\b|our\s+r+e+f|發件人|寄件人|收件人|主旨|附件|抄送|敬啟者|\b(?:manager|director|engineer|associate|consultant|officer|architect|surveyor)\b/i
+  );
+  if (stop >= 0) {
+    rest = rest.substring(0, stop);
+  }
+  rest = rest.replace(/\s+/g, ' ').trim();
+  const words = rest.split(' ').filter((word) => !!word && !isIncomingEmailHonorific(word));
+  if (words.length === 0) {
+    return '';
+  }
+  const nameWords = words.slice(0, Math.min(4, words.length));
+  if (nameWords.length > 4 || incomingEmailLooksLikeSentence(nameWords.join(' '))) {
+    return '';
+  }
+  return incomingEmailDisplayName(nameWords.join(' '));
+}
+
+function isIncomingEmailHonorific(word: string): boolean {
+  return /^(?:mr|mrs|ms|miss|dr|ir|prof|eng)(?:\.|:)?$/i.test(word || '');
+}
+
+function incomingEmailLooksLikeSentence(value: string): boolean {
+  const text = (value || '').toLowerCase();
+  return /\b(?:the|please|this|that|which|with|from|for|and|or)\b/.test(text);
+}
+
+function incomingEmailRecipientList(value: string): string[] {
+  const source = (value || '').replace(/\s+/g, ' ').trim();
+  if (!source) {
+    return [];
+  }
+  const bySemi = source.split(/\s*[;；]\s*/).map((part) => part.trim()).filter((part) => !!part);
+  const chunks = bySemi.length > 1 ? bySemi : incomingEmailSplitCommaRecipients(source);
+  const names: string[] = [];
+  chunks.forEach((chunk) => {
+    const name = incomingEmailDisplayName(chunk);
+    if (name) {
+      names.push(name);
+    }
+  });
+  return names;
+}
+
+function incomingEmailSplitCommaRecipients(value: string): string[] {
+  const parts = (value || '').split(/\s*,\s*/).map((part) => part.trim()).filter((part) => !!part);
+  if (parts.length <= 1) {
+    return parts.length === 1 ? parts : [];
+  }
+  if (parts.every((part) => incomingEmailWordCount(part) === 1) && parts.length % 2 === 0) {
+    const paired: string[] = [];
+    for (let index = 0; index < parts.length; index += 2) {
+      paired.push(parts[index] + ', ' + parts[index + 1]);
+    }
+    return paired;
+  }
+  const names: string[] = [];
+  let buffer = '';
+  parts.forEach((part) => {
+    if (!buffer) {
+      buffer = part;
+      return;
+    }
+    if (incomingEmailWordCount(buffer) === 1 && incomingEmailWordCount(part) >= 1) {
+      names.push(buffer + ', ' + part);
+      buffer = '';
+      return;
+    }
+    names.push(buffer);
+    buffer = part;
+  });
+  if (buffer) {
+    names.push(buffer);
+  }
+  return names;
+}
+
+function matchIncomingEmailNameInList(name: string, list: string[]): string {
+  const target = incomingEmailDisplayName(name);
+  if (!target || !list || list.length === 0) {
+    return '';
+  }
+  for (let index = 0; index < list.length; index++) {
+    if (incomingEmailNamesMatch(target, list[index])) {
+      return list[index];
+    }
+  }
+  return '';
+}
+
+function incomingEmailNamesMatch(left: string, right: string): boolean {
+  const a = incomingEmailNameTokens(left);
+  const b = incomingEmailNameTokens(right);
+  if (a.length === 0 || b.length === 0) {
+    return false;
+  }
+  if (a.join(' ') === b.join(' ')) {
+    return true;
+  }
+  if (a.slice().sort().join(' ') === b.slice().sort().join(' ')) {
+    return true;
+  }
+  if (a.length >= 2 && b.length >= 2) {
+    const smaller = a.length <= b.length ? a : b;
+    const larger = a.length <= b.length ? b : a;
+    return smaller.every((token) => larger.indexOf(token) >= 0);
+  }
+  return a.length === 1 && b.length === 1 && a[0] === b[0];
+}
+
+function incomingEmailNameTokens(value: string): string[] {
+  return incomingEmailDisplayName(value)
+    .toLowerCase()
+    .replace(/,/g, ' ')
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((token) => !!token && !isIncomingEmailHonorific(token));
 }
 
 function ourRefValueFromEmailText(text: string): string {

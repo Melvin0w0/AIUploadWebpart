@@ -54,7 +54,7 @@ function incomingEmailSystemPrompt(): string {
     'Copy original wording from text when it is visible. OCR text may include <u>underlined</u> and <b>bold</b> tags; never copy those tags into values.',
     'Use ONLY the last email in the printout (the last From / Sent / To / Subject block, often after Original Message or forwarded content). Ignore earlier emails above it.',
     'Sender is the FIRST name in CC: / Cc: / 抄送 on the LAST email-format page only, rewritten as Surname, Given (AAA BBB -> BBB, AAA). Do not use From:. Do not use c.c. / 副本 in a following letter.',
-    'Receiver is the To: / 收件人 value of that last email. Do not use Attn or Dear from a following letter.',
+    'Receiver: first take the name immediately below Regards / Best regards / Kind regards in the last email. If that name also appears in CC: of the last email, use that CC name. If it does not match CC, use the To: / 收件人 value of that last email. Do not use Attn or Dear from a following letter.',
     'Subject is ONLY the value after Subject: / 主旨: of that last email. STOP before the next header such as Sent: / From: / To: / Attachments:. Do not copy that next header or anything after it. Do not use letter titles after Dear.',
     'Issue Date is that last Sent: or Date:.',
     'Ref No is the value immediately after Our Ref: / 本處檔號. Look in the last email first; if it is not there, copy Our Ref: from the following letter. Do not use Your Ref.',
@@ -158,11 +158,11 @@ function buildIncomingEmailUserPrompt(
     ? [
       'Extract these fields from an incoming email printout sent TO AECOM.',
       'Images: the last email-format page. Ignore any letter that follows the emails for Sender / Receiver / Subject.',
-      'Use ONLY the last email (the last From / Sent / To / Subject block). Sender is the FIRST name in CC: on that last email-format page, rewritten as Surname, Given. Receiver is that last To:. Subject is ONLY the value after Subject: / 主旨:, and STOP before the next header. Issue Date is that last Sent: or Date:. Ref No is Our Ref: in the last email, or if missing, Our Ref: in the following letter.'
+      'Use ONLY the last email (the last From / Sent / To / Subject block). Sender is the FIRST name in CC: on that last email-format page, rewritten as Surname, Given. Receiver: if the name below Regards also appears in CC:, use that CC name; otherwise use that last To:. Subject is ONLY the value after Subject: / 主旨:, and STOP before the next header. Issue Date is that last Sent: or Date:. Ref No is Our Ref: in the last email, or if missing, Our Ref: in the following letter.'
     ]
     : [
       'Extract these fields from the OCR text of an incoming email printout sent TO AECOM.',
-      'Use ONLY the last email. Sender is the FIRST name in CC: on the last email-format page, rewritten as Surname, Given. Receiver is that last To:. Subject is ONLY the value after Subject: / 主旨:, and STOP before the next header. Issue Date is that last Sent: or Date:. Ref No is Our Ref: in the last email, or if missing, Our Ref: in the following letter.'
+      'Use ONLY the last email. Sender is the FIRST name in CC: on the last email-format page, rewritten as Surname, Given. Receiver: if the name below Regards also appears in CC:, use that CC name; otherwise use that last To:. Subject is ONLY the value after Subject: / 主旨:, and STOP before the next header. Issue Date is that last Sent: or Date:. Ref No is Our Ref: in the last email, or if missing, Our Ref: in the following letter.'
     ];
 
   const parts = [
@@ -185,9 +185,9 @@ function buildIncomingEmailUserPrompt(
     parts.push('', 'Sender is the FIRST name in CC: / Cc: / 抄送 on the LAST email-format page only, rewritten as Surname, Given (AAA BBB -> BBB, AAA). Do not use From:, earlier email pages, or c.c. / 副本 in a following letter.');
   }
   if (receiverName && receiverName.trim()) {
-    parts.push('', 'Detected Receiver from To: of the last email only:', receiverName.trim());
+    parts.push('', 'Detected Receiver. Prefer the name below Regards when it also appears in CC:; otherwise To: of the last email:', receiverName.trim());
   } else {
-    parts.push('', 'Receiver is the value after To: / 收件人 of the LAST email only. Do not use earlier emails or Attn in a following letter.');
+    parts.push('', 'Receiver: if the name below Regards / Best regards in the LAST email also appears in CC:, use that CC name. Otherwise use To: / 收件人 of the LAST email only. Do not use earlier emails or Attn in a following letter.');
   }
   if (organization && organization.trim()) {
     parts.push('', 'Detected Organization from the LEFT-HAND line above xx/F or xxx Road in the addressee address (not the whole row, not the letterhead):', organization.trim());
@@ -242,7 +242,7 @@ function incomingEmailFieldHelp(): string {
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
     'Organization: in the LEFT addressee address, find a floor line such as 12/F or G/F and copy only the left-hand line immediately above it. If there is no xx/F, find a line containing xxx Road and copy the left-hand line immediately above that. Do not use letterhead.',
     'Sender: the FIRST name in CC: / Cc: / 抄送 on the LAST email-format page only, rewritten as Surname, Given (AAA BBB -> BBB, AAA). Do not use From:. Do not use earlier email pages. Do not use c.c. / 副本 in a following letter.',
-    'Receiver: copy the To: / 收件人 value of the LAST email only. Do not use Attn, Dear, or a following letter.',
+    'Receiver: first copy the name immediately below Regards / Best regards / Kind regards in the last email if that name also appears in CC:. If it does not match CC, copy the To: / 收件人 value of the LAST email only. Do not use Attn, Dear, or a following letter.',
     'Subject: copy ONLY the value after Subject: / 主旨: of the last email, and STOP before the next title such as Sent: / From: / To: / Attachments:. Do not copy that next title. Do not use a letter title after Dear.',
     'File No: file number if shown separately from Ref No.',
     'Ref No: copy the value after Our Ref: / 本處檔號 in the last email, or if it is not in the email, from the following letter. Do not use Your Ref.',
