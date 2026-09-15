@@ -1,4 +1,4 @@
-import { SPHttpClient } from '@microsoft/sp-http';
+import { SPHttpClient, SPHttpClientResponse } from '@microsoft/sp-http';
 import {
   INCOMING_FOLDER_NAME,
   OUTGOING_FOLDER_NAME
@@ -10,26 +10,27 @@ import {
 } from '../constants/uploadType';
 import { collapsePath, trimSlash } from './uploadDestination';
 
+export interface IProjectUploadTypeResult {
+  types: UploadType[];
+  error?: string;
+}
+
 export async function lookupProjectUploadTypes(
   http: SPHttpClient,
   siteUrl: string,
   libraryName: string,
   projectFolderPath: string,
   correspondenceFolderName: string
-): Promise<UploadType[]> {
+): Promise<IProjectUploadTypeResult> {
   const webUrl = trimSlash(siteUrl);
   const library = (libraryName || '').trim();
   const projectPath = collapsePath(projectFolderPath || '');
   if (!webUrl || !library || !projectPath || !http) {
-    return [UPLOAD_TYPE_NORMAL];
+    return { types: [UPLOAD_TYPE_NORMAL] };
   }
 
   try {
     const libraryRoot = await readLibraryRoot(http, webUrl, library);
-    if (!libraryRoot) {
-      return [UPLOAD_TYPE_NORMAL];
-    }
-
     const found: { [key: string]: boolean } = {};
     const add = (uploadType: UploadType): void => {
       found[uploadType] = true;
@@ -65,9 +66,13 @@ export async function lookupProjectUploadTypes(
         types.push(uploadType);
       }
     });
-    return types;
-  } catch {
-    return [UPLOAD_TYPE_NORMAL];
+    return { types };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      types: [UPLOAD_TYPE_NORMAL],
+      error: message
+    };
   }
 }
 
@@ -91,10 +96,14 @@ async function readLibraryRoot(http: SPHttpClient, siteUrl: string, libraryTitle
     }
   });
   if (!response.ok) {
-    return '';
+    throw new Error(await readSharePointError(response, `Could not open "${libraryTitle}" on this project site.`));
   }
   const json = await response.json() as { RootFolder?: { ServerRelativeUrl?: string } };
-  return (json.RootFolder && json.RootFolder.ServerRelativeUrl) || '';
+  const root = (json.RootFolder && json.RootFolder.ServerRelativeUrl) || '';
+  if (!root) {
+    throw new Error(`Could not find "${libraryTitle}" on this project site.`);
+  }
+  return root;
 }
 
 async function listFolderNames(
@@ -110,8 +119,11 @@ async function listFolderNames(
       Accept: 'application/json;odata=nometadata'
     }
   });
-  if (response.status === 404 || !response.ok) {
+  if (response.status === 404) {
     return undefined;
+  }
+  if (!response.ok) {
+    throw new Error(await readSharePointError(response, 'Could not read folders in this project.'));
   }
   const json = await response.json() as {
     value?: { Name?: string }[];
@@ -121,6 +133,21 @@ async function listFolderNames(
   return items
     .map((item) => (item.Name || '').trim())
     .filter((name) => name && !isIgnoredFolderName(name));
+}
+
+async function readSharePointError(response: SPHttpClientResponse, fallback: string): Promise<string> {
+  try {
+    const json = await response.json() as {
+      error?: { message?: string | { value?: string } };
+      'odata.error'?: { message?: { value?: string } };
+    };
+    const verbose = json.error && typeof json.error.message === 'object' ? json.error.message.value : undefined;
+    const simple = json.error && typeof json.error.message === 'string' ? json.error.message : undefined;
+    const odata = json['odata.error'] && json['odata.error'].message ? json['odata.error'].message.value : undefined;
+    return verbose || simple || odata || `${fallback} (${response.status})`;
+  } catch {
+    return `${fallback} (${response.status})`;
+  }
 }
 
 function isIgnoredFolderName(name: string): boolean {

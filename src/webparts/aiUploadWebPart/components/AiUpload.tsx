@@ -77,7 +77,7 @@ import { extractFieldsWithAi, isAiExtractionConfigured } from '../services/AiFie
 import { detectIncomingFields, incomingAiHints, pickIncomingFieldValue } from '../services/incoming/fields';
 import { createIncomingOcrDecider, keepIncomingEmailPreviewPages } from '../services/incoming/email';
 import { detectOutgoingFields, outgoingAiHints, pickOutgoingFieldValue } from '../services/outgoing/fields';
-import { SharePointUploadService } from '../services/SharePointUploadService';
+import { DuplicateDestinationFileError, DuplicateRegistrationNumberError, SharePointUploadService } from '../services/SharePointUploadService';
 import {
   buildUploadFolderUrl,
   fileNameFromFields,
@@ -135,6 +135,7 @@ interface IAiUploadState {
   incomingLetterType: string;
   dearToSubjectText: string;
   projectUploadTypes: UploadType[];
+  folderLookupError: string | undefined;
 }
 
 interface IChoiceOption {
@@ -270,6 +271,8 @@ function AppleChoiceGroup(props: IChoiceGroupProps): React.ReactElement {
 
 export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadState> {
   private _fileInput: React.RefObject<HTMLInputElement>;
+  private _rootRef: React.RefObject<HTMLElement>;
+  private _bannerRef: React.RefObject<HTMLDivElement>;
   private _nextFieldId: number;
   private _originalPdfBytes: Uint8Array | undefined;
   private _calendarOpen: boolean;
@@ -289,6 +292,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   public constructor(props: IAiUploadProps) {
     super(props);
     this._fileInput = React.createRef<HTMLInputElement>();
+    this._rootRef = React.createRef<HTMLElement>();
+    this._bannerRef = React.createRef<HTMLDivElement>();
     this._nextFieldId = 1;
     this._originalPdfBytes = undefined;
     this._calendarOpen = false;
@@ -330,7 +335,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       labelType: LABEL_TYPE_NORMAL,
       incomingLetterType: '',
       dearToSubjectText: '',
-      projectUploadTypes: []
+      projectUploadTypes: [],
+      folderLookupError: undefined
     };
   }
 
@@ -341,13 +347,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._stopDevToolsWatch = subscribeDevToolsOpen(this._onDevToolsOpenChange);
   }
 
-  public componentDidUpdate(prevProps: IAiUploadProps): void {
+  public componentDidUpdate(prevProps: IAiUploadProps, prevState: IAiUploadState): void {
     if (prevProps.formFields !== this.props.formFields) {
       const fields = this._fieldsFromConfig(this.props.formFields, this.state.fields);
       this.setState({
         fields,
         activeFieldId: this._defaultActiveFieldId(fields)
       });
+    }
+    if (prevState.isUploading && !this.state.isUploading) {
+      this._scrollResultIntoView();
     }
   }
 
@@ -409,7 +418,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       labelType,
       incomingLetterType,
       dearToSubjectText,
-      projectUploadTypes
+      projectUploadTypes,
+      folderLookupError
     } = this.state;
     const busy = isProcessing || isUploading || isRestyling;
     const converted = pages.length > 0 && !isProcessing;
@@ -449,7 +459,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     const showDebugUi = isLocalDebug || devToolsOpen;
 
     return (
-      <section className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''} ${showDebugUi ? styles.debugMode : ''}`}>
+      <section
+        ref={this._rootRef}
+        className={`${styles.aiUpload} ${hasTeamsContext ? styles.teams : ''} ${showDebugUi ? styles.debugMode : ''}`}
+      >
         {showDebugUi && (
           <div className={styles.debugBanner} role="status">
             {strings.ServeDebugBanner || 'DEBUG'}
@@ -460,7 +473,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           <p className={styles.subtitle}>{strings.WebPartSubtitle}</p>
         </div>
 
-        {error && this._renderBanner('error', error, this._clearError)}
+        <div ref={this._bannerRef} className={styles.bannerHost}>
+        {(error || folderLookupError) && this._renderBanner('error', error || folderLookupError, this._clearError)}
         {!error && markRequired && requiredMissing.length > 0 && this._renderBanner(
           'error',
           locFormat(strings.RequiredFieldsPrompt, 'Please fill the required fields: {0}', requiredMissing.join(', '))
@@ -510,6 +524,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           </div>
         )}
         {warning && this._renderBanner('warning', warning, this._clearWarning)}
+        </div>
 
         <div className={styles.toolbar}>
           <input
@@ -1009,6 +1024,58 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     );
   };
 
+  private _scrollResultIntoView = (): void => {
+    const target = this._rootRef.current;
+    if (!target) {
+      return;
+    }
+    const extraTop = 240;
+    const run = (): void => {
+      const seen: HTMLElement[] = [];
+      let parent: HTMLElement | null = target.parentElement;
+      while (parent) {
+        const style = window.getComputedStyle(parent);
+        const overflowY = (style.overflowY || style.overflow || '').toLowerCase();
+        const canScroll = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+          && parent.scrollHeight > parent.clientHeight + 4;
+        if (canScroll) {
+          const top = target.getBoundingClientRect().top - parent.getBoundingClientRect().top + parent.scrollTop - extraTop;
+          parent.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+          seen.push(parent);
+        }
+        parent = parent.parentElement;
+      }
+
+      const selectors = [
+        '#workbenchPageContent',
+        '#spPageCanvasContent',
+        '[data-automation-id="contentScrollRegion"]',
+        '.CanvasComponent',
+        '.SPCanvas-canvas'
+      ];
+      selectors.forEach((selector) => {
+        const region = document.querySelector(selector) as HTMLElement | null;
+        if (!region || seen.indexOf(region) >= 0) {
+          return;
+        }
+        if (region.scrollHeight <= region.clientHeight + 4) {
+          return;
+        }
+        const top = target.getBoundingClientRect().top - region.getBoundingClientRect().top + region.scrollTop - extraTop;
+        region.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      });
+
+      const absoluteTop = target.getBoundingClientRect().top + (window.pageYOffset || 0) - extraTop;
+      window.scrollTo({ top: Math.max(0, absoluteTop), behavior: 'smooth' });
+      const doc = document.scrollingElement || document.documentElement;
+      if (doc) {
+        doc.scrollTo({ top: Math.max(0, absoluteTop), behavior: 'smooth' });
+      }
+    };
+    window.requestAnimationFrame(run);
+    window.setTimeout(run, 80);
+  };
+
   private _renderBanner = (
     kind: 'error' | 'info' | 'success' | 'warning',
     message: React.ReactNode,
@@ -1156,7 +1223,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _setActiveField = (fieldId: string): void => {
-    this.setState({ activeFieldId: fieldId, error: undefined });
+    this.setState({ activeFieldId: fieldId });
   };
 
   private _isCalendarElement = (node: EventTarget | null): boolean => {
@@ -1301,7 +1368,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         uploadType: canonicalUploadTypeForProjectNumber(prev.uploadType, nextProjectNumber),
         activeFieldId: fieldId,
         showRequiredErrors: false,
-        error: undefined
+        error: prev.error
       };
     }, () => {
       if (target && isProjectNumberField(target.label)) {
@@ -1622,7 +1689,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
     const folderName = correspondenceFolderName(documentKind);
     if (!projectDest.siteUrl || !projectDest.folderPath || !folderName) {
-      this.setState({ projectUploadTypes: [] });
+      this.setState({ projectUploadTypes: [], folderLookupError: undefined });
       return;
     }
     if (this._uploadFolderLookupTimer) {
@@ -1638,19 +1705,24 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         projectDest.libraryName,
         projectDest.folderPath,
         folderName
-      ).then((types) => {
+      ).then((result) => {
         if (seq !== this._uploadFolderLookupSeq) {
           return;
         }
         this.setState((prev) => ({
-          projectUploadTypes: types,
-          uploadType: constrainUploadType(prev.uploadType, types)
+          projectUploadTypes: result.types,
+          uploadType: constrainUploadType(prev.uploadType, result.types),
+          folderLookupError: result.error
         }));
-      }).catch(() => {
+      }).catch((err) => {
         if (seq !== this._uploadFolderLookupSeq) {
           return;
         }
-        this.setState({ projectUploadTypes: [] });
+        const message = err instanceof Error ? err.message : String(err);
+        this.setState({
+          projectUploadTypes: [UPLOAD_TYPE_NORMAL],
+          folderLookupError: message
+        });
       });
     }, 300);
   };
@@ -1769,7 +1841,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       showRequiredErrors: false,
       incomingLetterType: '',
       dearToSubjectText: '',
-      projectUploadTypes: []
+      projectUploadTypes: [],
+      folderLookupError: undefined
     }, () => {
       this._refreshProjectUploadTypes();
     });
@@ -1871,7 +1944,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _uploadToSharePoint = async (): Promise<void> => {
     const { file, fields } = this.state;
     if (!file) {
-      this.setState({ error: strings.UploadNeedFile });
+      this.setState({ error: strings.UploadNeedFile }, this._scrollResultIntoView);
       return;
     }
 
@@ -1880,7 +1953,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       this.setState({
         showRequiredErrors: true,
         error: locFormat(strings.UploadMissingFields, 'Fill these required fields before uploading: {0}', requiredMissing.join(', '))
-      });
+      }, this._scrollResultIntoView);
       return;
     }
 
@@ -1900,20 +1973,20 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (destination.missingFields.length > 0) {
       this.setState({
         error: locFormat(strings.UploadMissingFields, 'Fill these required fields before uploading: {0}', destination.missingFields.join(', '))
-      });
+      }, this._scrollResultIntoView);
       return;
     }
 
     if (destination.unrecognizedLeadingBl) {
       this.setState({
         error: locFormat(strings.UploadUnknownLeadingBl, 'Leading BL "{0}" does not match a business line site. Choose a listed business line.', destination.unrecognizedLeadingBl)
-      });
+      }, this._scrollResultIntoView);
       return;
     }
 
     const projectNumberField = fields.filter((field) => isProjectNumberField(field.label))[0];
     if (projectNumberField && !isValidProjectNumber(projectNumberField.value)) {
-      this.setState({ error: strings.UploadInvalidProjectNumber });
+      this.setState({ error: strings.UploadInvalidProjectNumber }, this._scrollResultIntoView);
       return;
     }
 
@@ -2000,7 +2073,20 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         history: this._persistHistory(rememberFieldValues(this.state.history, fields))
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : strings.UploadFailed;
+      const message = err instanceof DuplicateRegistrationNumberError
+        ? locFormat(
+          strings.UploadRegistrationExists,
+          'Registration Number "{0}" has already been uploaded in folder "{1}".',
+          err.registrationNumber,
+          err.folderPath || err.fileName || 'this library'
+        )
+        : err instanceof DuplicateDestinationFileError
+          ? locFormat(
+            strings.UploadFileExists,
+            'A file named "{0}" already exists in this folder.',
+            err.fileName
+          )
+          : (err instanceof Error ? err.message : strings.UploadFailed);
       this.setState({
         isUploading: false,
         uploadStatus: undefined,
@@ -2294,6 +2380,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (status.indexOf('Creating folder') === 0) {
       return strings.UploadCreatingFolder;
     }
+    if (status.indexOf('Checking Registration Number') === 0) {
+      return strings.UploadCheckingRegistration || 'Checking Registration Number…';
+    }
+    if (status.indexOf('Checking if the file already exists') === 0) {
+      return strings.UploadCheckingFileExists || 'Checking if the file already exists…';
+    }
     if (status.indexOf('Uploading PDF') === 0) {
       return strings.UploadSendingFile;
     }
@@ -2336,7 +2428,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       labelType: LABEL_TYPE_NORMAL,
       incomingLetterType: '',
       dearToSubjectText: '',
-      projectUploadTypes: []
+      projectUploadTypes: [],
+      folderLookupError: undefined
     });
   };
 
@@ -2359,7 +2452,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _clearError = (): void => {
-    this.setState({ error: undefined });
+    this.setState({ error: undefined, folderLookupError: undefined });
   };
 
   private _clearInfo = (): void => {

@@ -26,6 +26,7 @@
   color: var(--apple-text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
+  scroll-margin-top: 240px;
 
   &.debugMode {
     box-shadow: inset 0 6px 0 0 #ff2d55, var(--apple-shadow);
@@ -320,6 +321,10 @@
     color: var(--apple-tertiary);
     background: transparent;
   }
+}
+
+.bannerHost {
+  scroll-margin-top: 240px;
 }
 
 .banner {
@@ -626,7 +631,7 @@
 
 .fieldRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 }
 
@@ -637,6 +642,7 @@
   font-weight: 400;
   line-height: 1.25;
   color: var(--apple-text);
+  padding-top: 8px;
 }
 
 .fieldInput {
@@ -645,7 +651,7 @@
 }
 
 .fieldGroup {
-  overflow: hidden;
+  overflow: visible;
   border-radius: var(--apple-radius-sm);
   background: var(--apple-card);
   border: 1px solid var(--apple-separator);
@@ -664,6 +670,15 @@
 
     .ms-TextField-description {
       display: none;
+    }
+
+    .ms-TextField-errorMessage,
+    .ms-Dropdown-errorMessage {
+      display: block;
+      font-size: 12px;
+      line-height: 1.3;
+      color: var(--apple-red);
+      padding-top: 4px;
     }
 
     .ms-Dropdown-title {

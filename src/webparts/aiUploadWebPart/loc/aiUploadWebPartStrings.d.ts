@@ -70,6 +70,10 @@ declare interface IAiUploadWebPartStrings {
   UploadReadingSite: string;
   UploadFindingLibrary: string;
   UploadCreatingFolder: string;
+  UploadCheckingRegistration: string;
+  UploadRegistrationExists: string;
+  UploadCheckingFileExists: string;
+  UploadFileExists: string;
   UploadSendingFile: string;
   UploadUpdatingFields: string;
   UploadSucceeded: string;

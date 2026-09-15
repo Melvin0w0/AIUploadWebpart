@@ -75,7 +75,7 @@ export const SYSTEM_FIELD_NAMES: string[] = [
   '_moderationcomments'
 ];
 
-const REGISTRATION_NUMBER_INTERNAL: string = 'Registration_x0020_Number';
+export const REGISTRATION_NUMBER_INTERNAL: string = 'Registration_x0020_Number';
 
 const ALIASES: { [key: string]: string[] } = {
   name: ['title', 'name', 'documentname'],
