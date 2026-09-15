@@ -1,4 +1,5 @@
 import { SPHttpClient, SPHttpClientResponse } from '@microsoft/sp-http';
+import { BL_SITE_MAP, canonicalLeadingBl } from '../constants/blSiteMap';
 
 export const ROOT_URL_MAPPING_LIST_TITLE: string = 'Root URL Mapping List';
 
@@ -7,6 +8,14 @@ export interface IRootUrlMappingLookup {
   destinationSiteUrl: string;
   leadingBl: string;
   projectNumber: string;
+  listTitle?: string;
+}
+
+export interface IRootUrlMappingCodeLookup {
+  listWebUrl: string;
+  siteAbsoluteUrl?: string;
+  destinationSiteUrl?: string;
+  leadingBl: string;
   listTitle?: string;
 }
 
@@ -53,6 +62,44 @@ export async function assertActiveRootUrlMapping(
   }
 }
 
+export async function lookupRootUrlMappingCode(
+  http: SPHttpClient,
+  lookup: IRootUrlMappingCodeLookup
+): Promise<string> {
+  const leadingBl = (lookup.leadingBl || '').trim();
+  if (!leadingBl) {
+    return '';
+  }
+  const listTitle = (lookup.listTitle || ROOT_URL_MAPPING_LIST_TITLE).trim() || ROOT_URL_MAPPING_LIST_TITLE;
+  const sitesToTry = uniqueUrls([
+    lookup.listWebUrl,
+    lookup.siteAbsoluteUrl || '',
+    lookup.destinationSiteUrl || ''
+  ]);
+  let items: { [key: string]: unknown }[] | undefined;
+
+  for (const siteUrl of sitesToTry) {
+    try {
+      items = await readMappingItems(http, siteUrl, listTitle);
+      break;
+    } catch (err) {
+      const lastError = err instanceof Error ? err.message : String(err);
+      if (!isMissingListError(lastError)) {
+        throw err;
+      }
+    }
+  }
+
+  if (!items || items.length === 0) {
+    return '';
+  }
+
+  const matches = items.filter((item) => itemMatchesLeadingBl(item, leadingBl));
+  const preferred = matches.filter((item) => isActiveYes(readActiveValue(item)));
+  const chosen = (preferred.length > 0 ? preferred : matches)[0];
+  return chosen ? readCodeValue(chosen) : '';
+}
+
 async function readMappingItems(
   http: SPHttpClient,
   siteUrl: string,
@@ -82,6 +129,80 @@ async function readMappingItems(
   }
 
   return items;
+}
+
+function itemMatchesLeadingBl(item: { [key: string]: unknown }, leadingBl: string): boolean {
+  const needles = leadingBlNeedles(leadingBl);
+  if (needles.length === 0) {
+    return false;
+  }
+  const primary = uniqueStrings([
+    readScalar(item, 'Leading_x0020_BL'),
+    readScalar(item, 'LeadingBL'),
+    readScalar(item, 'Title'),
+    readCodeValue(item)
+  ]);
+  if (needles.some((needle) => primary.some((field) => valuesMatch(field, needle)))) {
+    return true;
+  }
+  const fields = collectSearchableValues(item);
+  return needles.some((needle) => fields.some((field) => valuesMatch(field, needle)));
+}
+
+function leadingBlNeedles(leadingBl: string): string[] {
+  const name = canonicalLeadingBl(leadingBl);
+  const path = name && BL_SITE_MAP[name] ? BL_SITE_MAP[name] : '';
+  const code = path ? path.substring(path.lastIndexOf('_') + 1) : '';
+  return uniqueStrings([leadingBl, name, code]);
+}
+
+function readCodeValue(item: { [key: string]: unknown }): string {
+  const keys = Object.keys(item);
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    if (normalizeKey(key.replace(/_x0020_/gi, ' ')) !== 'code') {
+      continue;
+    }
+    const text = readScalar(item, key);
+    if (text) {
+      return text;
+    }
+  }
+  const siteUrl = readUrl(item.SiteURL) || readScalar(item, 'SiteURL');
+  return blCode(siteUrl);
+}
+
+function readScalar(item: { [key: string]: unknown }, key: string): string {
+  if (!Object.prototype.hasOwnProperty.call(item, key)) {
+    const match = Object.keys(item).filter((name) => name.toLowerCase() === key.toLowerCase())[0];
+    if (!match) {
+      return '';
+    }
+    return scalarText(item[match]);
+  }
+  return scalarText(item[key]);
+}
+
+function readUrl(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') {
+    return '';
+  }
+  const record = raw as { Url?: string };
+  return (record.Url || '').trim();
+}
+
+function scalarText(raw: unknown): string {
+  if (raw === null || raw === undefined) {
+    return '';
+  }
+  if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') {
+    return String(raw).trim();
+  }
+  if (typeof raw === 'object') {
+    const record = raw as { Url?: string; Description?: string; Title?: string; Value?: string };
+    return (record.Title || record.Value || record.Description || record.Url || '').trim();
+  }
+  return '';
 }
 
 function itemMatchesDestination(

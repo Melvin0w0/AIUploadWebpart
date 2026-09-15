@@ -1,3 +1,5 @@
+import { isEoiProjectNumber } from './projectNumber';
+
 export type UploadType = 'normal' | 'confidentialInvoice' | 'confidentialMisc';
 
 export const UPLOAD_TYPE_NORMAL: UploadType = 'normal';
@@ -13,6 +15,15 @@ export const UPLOAD_TYPE_OPTIONS: { key: UploadType; label: string }[] = [
   { key: UPLOAD_TYPE_CONFIDENTIAL_MISC, label: 'Confidential MISC' }
 ];
 
+export const EOI_UPLOAD_TYPE_OPTIONS: { key: UploadType; label: string }[] = [
+  { key: UPLOAD_TYPE_NORMAL, label: 'Normal' },
+  { key: UPLOAD_TYPE_CONFIDENTIAL_MISC, label: 'Confidential MISC' }
+];
+
+export function uploadTypeOptionsForProjectNumber(projectNumber: string): { key: UploadType; label: string }[] {
+  return isEoiProjectNumber(projectNumber) ? EOI_UPLOAD_TYPE_OPTIONS : UPLOAD_TYPE_OPTIONS;
+}
+
 export function canonicalUploadType(value: string): UploadType {
   const key = (value || '').trim().toLowerCase().replace(/[\s-]+/g, '');
   if (key === UPLOAD_TYPE_CONFIDENTIAL_INVOICE.toLowerCase() || key === 'confidentialinvoice') {
@@ -22,6 +33,14 @@ export function canonicalUploadType(value: string): UploadType {
     return UPLOAD_TYPE_CONFIDENTIAL_MISC;
   }
   return UPLOAD_TYPE_NORMAL;
+}
+
+export function canonicalUploadTypeForProjectNumber(value: string, projectNumber: string): UploadType {
+  const uploadType = canonicalUploadType(value);
+  if (isEoiProjectNumber(projectNumber) && uploadType === UPLOAD_TYPE_CONFIDENTIAL_INVOICE) {
+    return UPLOAD_TYPE_NORMAL;
+  }
+  return uploadType;
 }
 
 export function confidentialFolderForUploadType(uploadType: UploadType): string {

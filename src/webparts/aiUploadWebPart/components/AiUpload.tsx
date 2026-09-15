@@ -23,13 +23,16 @@ import { buildOcrFieldMarks, formatOcrTextWithDebugMarks, IOcrFieldMark } from '
 import { formatOcrTextWithStyles, joinOcrWords, stripOcrStyleTags } from '../services/ocrSelection';
 import PdfHighlightViewer from './PdfHighlightViewer';
 import { DEFAULT_FORM_FIELDS, isNameField, isOrganizationField, isReceiverField, isRefNoField, isReadOnlyFormField, isRegistrationNumberField, isRequiredField, isSenderField, isSubjectField, missingRequiredFields } from '../constants/defaultFormFields';
-import { CorrespondenceKind, correspondenceKindFromFileName, generateIncomingName, nameFromPdfFile } from '../constants/incomingName';
+import { CorrespondenceKind, correspondenceKindFromFileName, generateIncomingName, isIncomingName, nameFromPdfFile } from '../constants/incomingName';
 import {
   canonicalLeadingBl,
   isLeadingBlField,
-  LEADING_BL_OPTIONS
+  LEADING_BL_OPTIONS,
+  resolveLeadingBlSite
 } from '../constants/blSiteMap';
 import {
+  eoiProjectNumberFromCode,
+  isEoiProjectNumber,
   isProjectNumberField,
   isValidProjectNumber,
   sanitizeProjectNumber
@@ -58,10 +61,10 @@ import {
   YES_VALUE
 } from '../constants/yesNo';
 import {
-  canonicalUploadType,
+  canonicalUploadTypeForProjectNumber,
   UploadType,
   UPLOAD_TYPE_NORMAL,
-  UPLOAD_TYPE_OPTIONS
+  uploadTypeOptionsForProjectNumber
 } from '../constants/uploadType';
 import {
   canonicalLabelType,
@@ -89,7 +92,8 @@ import {
   suggestionsFor,
   IFieldHistory
 } from '../services/fieldHistory';
-import { lookupLabelStaffFromNotificationSetup, lookupLeadingBlFromNotificationSetup, lookupNotificationSetupByProjectName, INotificationSetupLookup } from '../services/notificationSetup';
+import { lookupLabelStaffFromNotificationSetup, lookupLeadingBlFromNotificationSetup, lookupNotificationSetupByProjectName, INotificationSetupLookup, emptyLabelStaff } from '../services/notificationSetup';
+import { lookupRootUrlMappingCode, ROOT_URL_MAPPING_LIST_TITLE } from '../services/rootUrlMapping';
 import { generateLabelPagePng } from '../services/labelPage';
 import { appendLabelPageToPdf } from '../services/pdfLabelAppend';
 import { isDevToolsOpen, isSpfxServeDebug, subscribeDevToolsOpen } from '../services/spfxLocalDebug';
@@ -127,6 +131,7 @@ interface IAiUploadState {
   historyFieldId: string | undefined;
   uploadType: UploadType;
   labelType: LabelType;
+  incomingLetterType: string;
 }
 
 export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadState> {
@@ -140,6 +145,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   private _historyCloseTimer: number | undefined;
   private _leadingBlLookupSeq: number = 0;
   private _leadingBlLookupTimer: number | undefined;
+  private _eoiLookupSeq: number = 0;
+  private _eoiLookupTimer: number | undefined;
   private _stopDevToolsWatch: (() => void) | undefined;
   private _restyleSeq: number;
 
@@ -151,6 +158,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this._calendarOpen = false;
     this._leadingBlLookupSeq = 0;
     this._leadingBlLookupTimer = undefined;
+    this._eoiLookupSeq = 0;
+    this._eoiLookupTimer = undefined;
     this._stopDevToolsWatch = undefined;
     this._restyleSeq = 0;
     const fields = this._fieldsFromConfig(props.formFields);
@@ -180,7 +189,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       history: loadFieldHistory(),
       historyFieldId: undefined,
       uploadType: UPLOAD_TYPE_NORMAL,
-      labelType: LABEL_TYPE_NORMAL
+      labelType: LABEL_TYPE_NORMAL,
+      incomingLetterType: ''
     };
   }
 
@@ -213,7 +223,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (this._leadingBlLookupTimer !== undefined) {
       window.clearTimeout(this._leadingBlLookupTimer);
     }
+    if (this._eoiLookupTimer !== undefined) {
+      window.clearTimeout(this._eoiLookupTimer);
+    }
     this._leadingBlLookupSeq = this._leadingBlLookupSeq + 1;
+    this._eoiLookupSeq = this._eoiLookupSeq + 1;
     this._restyleSeq = this._restyleSeq + 1;
     this._revokePageUrls(this.state.pages);
     if (this._stopDevToolsWatch) {
@@ -267,17 +281,20 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       )
       : '';
     const hasFieldValues = fields.some((field) => field.value.length > 0);
+    const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
+    const projectNumber = this._namedValue(fields, isProjectNumberField);
+    const resolvedUploadType = canonicalUploadTypeForProjectNumber(uploadType, projectNumber);
     const destination = resolveUploadDestination(fields, {
       tenantUrl: this.props.tenantUrl,
       libraryName: this.props.libraryName,
       folderPathTemplate: this.props.folderPathTemplate,
-      uploadType
+      uploadType: resolvedUploadType,
+      correspondenceKind: documentKind
     });
     const destinationUrl = buildUploadFolderUrl(destination);
     const destinationLabel = !destination.siteUrl
       ? strings.UploadDestinationPending
       : destinationUrl;
-    const documentKind = file ? correspondenceKindFromFileName(file.name) : 'unknown';
     const isLocalDebug = isSpfxServeDebug();
     const showDebugUi = isLocalDebug || devToolsOpen;
 
@@ -687,8 +704,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
               <div className={styles.uploadSelectors}>
                 <Dropdown
                   label={strings.UploadTypeLabel || 'Upload Type'}
-                  selectedKey={uploadType}
-                  options={this._uploadTypeOptions()}
+                  selectedKey={resolvedUploadType}
+                  options={this._uploadTypeOptions(projectNumber)}
                   onChange={(_event, option) => this._onUploadTypeChange(option ? String(option.key) : UPLOAD_TYPE_NORMAL)}
                   disabled={busy}
                   className={styles.uploadType}
@@ -1065,7 +1082,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           fields: prev.fields,
           activeFieldId: fieldId,
           showRequiredErrors: prev.showRequiredErrors,
-          error: prev.error
+          error: prev.error,
+          uploadType: prev.uploadType
         };
       }
       const fields = prev.fields.map((field) => {
@@ -1079,8 +1097,13 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           debugSource: nextValue ? '手動輸入' : undefined
         };
       });
+      const nextFields = this._syncRegistrationFromName(fields);
       return {
-        fields: this._syncRegistrationFromName(fields),
+        fields: nextFields,
+        uploadType: canonicalUploadTypeForProjectNumber(
+          prev.uploadType,
+          this._namedValue(nextFields, isProjectNumberField)
+        ),
         activeFieldId: fieldId,
         showRequiredErrors: false,
         error: undefined
@@ -1089,6 +1112,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (target && isProjectNumberField(target.label)) {
       this._refreshLeadingBlFromNotificationSetup(this._normalizeFieldValue(target.label, value));
     }
+    if (target && isLeadingBlField(target.label) && this.state.incomingLetterType === 'email') {
+      this._refreshEmailEoiProjectNumber(this._normalizeFieldValue(target.label, value));
+    }
   };
 
   private _refreshLeadingBlFromNotificationSetup = (projectNumber: string): void => {
@@ -1096,8 +1122,11 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     if (!file) {
       return;
     }
+    if (this.state.incomingLetterType === 'email' || isEoiProjectNumber(projectNumber)) {
+      return;
+    }
     const projectNo = sanitizeProjectNumber(projectNumber);
-    if (!isValidProjectNumber(projectNo)) {
+    if (!isValidProjectNumber(projectNo) || isEoiProjectNumber(projectNo)) {
       return;
     }
     if (this._leadingBlLookupTimer) {
@@ -1150,6 +1179,65 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
   };
 
+  private _refreshEmailEoiProjectNumber = (leadingBl: string): void => {
+    if (this.state.incomingLetterType !== 'email') {
+      return;
+    }
+    if (this._eoiLookupTimer) {
+      window.clearTimeout(this._eoiLookupTimer);
+    }
+    this._eoiLookupSeq = this._eoiLookupSeq + 1;
+    const seq = this._eoiLookupSeq;
+    const bl = (leadingBl || '').trim();
+    if (!bl) {
+      this.setState((prev) => ({
+        fields: this._setEmailEoiProjectNumber(prev.fields, ''),
+        uploadType: canonicalUploadTypeForProjectNumber(prev.uploadType, '')
+      }));
+      return;
+    }
+    this._eoiLookupTimer = window.setTimeout(() => {
+      this._eoiLookupTimer = undefined;
+      this._lookupEmailEoiProjectNumber(bl).then((projectNumber) => {
+        if (seq !== this._eoiLookupSeq) {
+          return;
+        }
+        this.setState((prev) => ({
+          fields: this._setEmailEoiProjectNumber(prev.fields, projectNumber),
+          uploadType: canonicalUploadTypeForProjectNumber(prev.uploadType, projectNumber)
+        }));
+      }).catch(() => {
+        return;
+      });
+    }, 200);
+  };
+
+  private _lookupEmailEoiProjectNumber = async (leadingBl: string): Promise<string> => {
+    const blSite = resolveLeadingBlSite(leadingBl, this.props.tenantUrl);
+    const code = await lookupRootUrlMappingCode(this.props.spHttpClient, {
+      listWebUrl: this.props.currentWebUrl,
+      siteAbsoluteUrl: this.props.siteAbsoluteUrl,
+      destinationSiteUrl: blSite ? blSite.siteUrl : '',
+      leadingBl,
+      listTitle: ROOT_URL_MAPPING_LIST_TITLE
+    });
+    return eoiProjectNumberFromCode(code);
+  };
+
+  private _setEmailEoiProjectNumber = (fields: IFormField[], projectNumber: string): IFormField[] => {
+    return fields.map((field) => {
+      if (!isProjectNumberField(field.label)) {
+        return field;
+      }
+      const value = sanitizeProjectNumber(projectNumber);
+      return {
+        ...field,
+        value,
+        debugSource: value ? 'Root URL Mapping Code' : undefined
+      };
+    });
+  };
+
   private _applyPdfFileName = (fields: IFormField[], fileName?: string): IFormField[] => {
     const pdfName = fileName ? nameFromPdfFile(fileName) : '';
     const withName = fields.map((field) => (
@@ -1188,7 +1276,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           : { ...field, value: this._defaultFieldValue(field.label), debugSource: undefined }
       ))
       : fields;
-    return this._applyNameForKind(next, kind, fileName);
+    const nameField = next.filter((field) => isNameField(field.label))[0];
+    const regenerateIncoming = kind === 'incoming' && !isIncomingName(nameField ? nameField.value : '');
+    return this._applyNameForKind(next, kind, fileName, regenerateIncoming);
   };
 
   private _syncRegistrationFromName = (fields: IFormField[]): IFormField[] => {
@@ -1297,8 +1387,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
   };
 
-  private _uploadTypeOptions = (): IDropdownOption[] => {
-    return UPLOAD_TYPE_OPTIONS.map((option) => ({
+  private _uploadTypeOptions = (projectNumber?: string): IDropdownOption[] => {
+    return uploadTypeOptionsForProjectNumber(projectNumber || '').map((option) => ({
       key: option.key,
       text: this._uploadTypeLabel(option.key)
     }));
@@ -1315,8 +1405,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
   };
 
   private _onUploadTypeChange = (value: string): void => {
+    const projectNumber = this._namedValue(this.state.fields, isProjectNumberField);
     this.setState({
-      uploadType: canonicalUploadType(value)
+      uploadType: canonicalUploadTypeForProjectNumber(value, projectNumber)
     });
   };
 
@@ -1438,7 +1529,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       currentPage: 1,
       selectedWordIndexes: [],
       fields: this._fieldsForSelectedFile(this.state.fields, selected.name),
-      showRequiredErrors: false
+      showRequiredErrors: false,
+      incomingLetterType: ''
     });
   };
 
@@ -1551,11 +1643,14 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       return;
     }
 
+    const projectNumber = this._namedValue(fields, isProjectNumberField);
+    const resolvedUploadType = canonicalUploadTypeForProjectNumber(this.state.uploadType, projectNumber);
     const destination = resolveUploadDestination(fields, {
       tenantUrl: this.props.tenantUrl,
       libraryName: this.props.libraryName,
       folderPathTemplate: this.props.folderPathTemplate,
-      uploadType: this.state.uploadType
+      uploadType: resolvedUploadType,
+      correspondenceKind: correspondenceKindFromFileName(file.name)
     });
 
     if (destination.missingFields.length > 0) {
@@ -1598,11 +1693,14 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       if (isIncoming) {
         try {
           this.setState({ uploadStatus: strings.UploadGeneratingLabel || 'Generating label page…' });
-          const staff = await lookupLabelStaffFromNotificationSetup(
-            this.props.spHttpClient,
-            this.props.currentWebUrl,
-            this._namedValue(fields, isProjectNumberField)
-          );
+          const projectNo = this._namedValue(fields, isProjectNumberField);
+          const staff = isEoiProjectNumber(projectNo)
+            ? emptyLabelStaff()
+            : await lookupLabelStaffFromNotificationSetup(
+              this.props.spHttpClient,
+              this.props.currentWebUrl,
+              projectNo
+            );
           const labelPng = await generateLabelPagePng(this.props.spHttpClient, {
             labelType: this.state.labelType,
             projectNumber: this._namedValue(fields, isProjectNumberField),
@@ -1617,7 +1715,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             refNo: this._namedValue(fields, isRefNoField),
             hasAttachment: canonicalYesNo(this._namedValue(fields, isAttachmentField)) === YES_VALUE,
             ccToAecom: canonicalYesNo(this._namedValue(fields, isCcToAecomField)) === YES_VALUE,
-            uploadType: this.state.uploadType,
+            uploadType: resolvedUploadType,
             staff,
             hasScan: canonicalYesNo(this._namedValue(fields, isScanField)) === YES_VALUE,
             siteUrls: [this.props.siteAbsoluteUrl, this.props.currentWebUrl].filter((url, index, list) =>
@@ -1683,6 +1781,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       successFolderUrl: undefined,
       warning: undefined,
       showRequiredErrors: false,
+      incomingLetterType: '',
       pages: [],
       currentPage: 1,
       selectedWordIndexes: [],
@@ -1721,7 +1820,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       const previewPages = documentKind === 'incoming'
         ? keepIncomingEmailPreviewPages(result.pages)
         : result.pages;
-      let filled: { fields: IFormField[]; info: string | undefined; warning?: string };
+      let filled: { fields: IFormField[]; info: string | undefined; warning?: string; letterType: string };
       this.setState({
         progress: {
           page: previewPages.length,
@@ -1733,7 +1832,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       try {
         filled = await this._fillFields(result.pages, documentKind);
       } catch {
-        filled = { fields: this.state.fields, info: undefined };
+        filled = { fields: this.state.fields, info: undefined, letterType: '' };
       }
       this.setState({
         pages: previewPages,
@@ -1744,7 +1843,12 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         fieldDebugMarks: buildOcrFieldMarks(previewPages, filled.fields),
         error: undefined,
         info: filled.info,
-        warning: filled.warning
+        warning: filled.warning,
+        incomingLetterType: documentKind === 'incoming' ? (filled.letterType || '') : '',
+        uploadType: canonicalUploadTypeForProjectNumber(
+          this.state.uploadType,
+          this._namedValue(filled.fields, isProjectNumberField)
+        )
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
@@ -1761,6 +1865,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     error: string | undefined;
     info: string | undefined;
     warning?: string;
+    letterType: string;
   }> => {
     const labels = this.state.fields.map((field) => field.label);
     const incoming = kind === 'incoming';
@@ -1811,15 +1916,17 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           debugSource: pickedField.source || undefined
         };
       });
+      const mappedName = mapped.filter((field) => isNameField(field.label))[0];
       fields = incoming
-        ? this._ensureIncomingName(mapped)
+        ? this._ensureIncomingName(mapped, !isIncomingName(mappedName ? mappedName.value : ''))
         : this._applyPdfFileName(mapped, this.state.file ? this.state.file.name : undefined);
     } catch {
       fields = this.state.fields;
     }
 
     let warning: string | undefined;
-    if (incoming) {
+    const incomingEmail = incoming && detected.letterType === 'email';
+    if (incoming && !incomingEmail) {
       const agreementNo = detected.agreementNo || '';
       if (agreementNo) {
         try {
@@ -1858,6 +1965,19 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
           warning = undefined;
         }
       }
+    } else if (incomingEmail) {
+      const leadingField = fields.filter((field) => isLeadingBlField(field.label))[0];
+      const leadingBl = leadingField ? (leadingField.value || '').trim() : '';
+      if (leadingBl) {
+        try {
+          const projectNumber = await this._lookupEmailEoiProjectNumber(leadingBl);
+          fields = this._setEmailEoiProjectNumber(fields, projectNumber);
+        } catch {
+          fields = this._setEmailEoiProjectNumber(fields, '');
+        }
+      } else {
+        fields = this._setEmailEoiProjectNumber(fields, '');
+      }
     } else {
       const projectField = fields.filter((field) => isProjectNumberField(field.label))[0];
       const resolvedProjectNumber = projectField ? sanitizeProjectNumber(projectField.value) : '';
@@ -1885,7 +2005,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       error: undefined,
       info,
       warning,
-      fields
+      fields,
+      letterType: incoming ? (detected.letterType || '') : ''
     };
   };
 
@@ -1963,7 +2084,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       isRestyling: false,
       progress: undefined,
       uploadType: UPLOAD_TYPE_NORMAL,
-      labelType: LABEL_TYPE_NORMAL
+      labelType: LABEL_TYPE_NORMAL,
+      incomingLetterType: ''
     });
   };
 

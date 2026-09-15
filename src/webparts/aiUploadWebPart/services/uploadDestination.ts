@@ -6,9 +6,14 @@ import {
   isProjectNumberField,
   sanitizeProjectNumber
 } from '../constants/projectNumber';
-import { INCOMING_FOLDER_NAME, OUTGOING_FOLDER_NAME, isIncomingName, isOutgoingName } from '../constants/incomingName';
 import {
-  canonicalUploadType,
+  CorrespondenceKind,
+  correspondenceKindFromName,
+  INCOMING_FOLDER_NAME,
+  OUTGOING_FOLDER_NAME
+} from '../constants/incomingName';
+import {
+  canonicalUploadTypeForProjectNumber,
   confidentialFolderForUploadType,
   UploadType,
   UPLOAD_TYPE_NORMAL
@@ -24,6 +29,7 @@ export interface IUploadDestinationConfig {
   libraryName: string;
   folderPathTemplate: string;
   uploadType?: UploadType | string;
+  correspondenceKind?: CorrespondenceKind;
 }
 
 export interface IResolvedUploadDestination {
@@ -64,11 +70,17 @@ export function resolveUploadDestination(
 
   const folderPath = collapsePath(replaceTokens(folderTemplate, values, extras, true));
   const nameValue = lookup(values, 'Name');
-  const uploadType = canonicalUploadType(config.uploadType || UPLOAD_TYPE_NORMAL);
+  const uploadType = canonicalUploadTypeForProjectNumber(
+    config.uploadType || UPLOAD_TYPE_NORMAL,
+    lookup(values, 'Project Number')
+  );
+  const kind = config.correspondenceKind && config.correspondenceKind !== 'unknown'
+    ? config.correspondenceKind
+    : correspondenceKindFromName(nameValue);
   return {
     siteUrl: blSite ? blSite.siteUrl : '',
     libraryName,
-    folderPath: appendCorrespondenceFolder(folderPath, nameValue, uploadType),
+    folderPath: appendCorrespondenceFolder(folderPath, kind, uploadType),
     leadingBl: blSite ? blSite.name : leadingBl,
     projectNumber: lookup(values, 'Project Number'),
     missingFields,
@@ -123,15 +135,15 @@ function lookup(values: { [label: string]: string }, name: string): string {
   return key ? values[key] : '';
 }
 
-function appendCorrespondenceFolder(folderPath: string, nameValue: string, uploadType: UploadType): string {
+function appendCorrespondenceFolder(folderPath: string, kind: CorrespondenceKind, uploadType: UploadType): string {
   if (!folderPath) {
     return folderPath;
   }
   let next = folderPath;
-  if (isOutgoingName(nameValue)) {
-    next = appendFolderSegment(next, OUTGOING_FOLDER_NAME);
-  } else if (isIncomingName(nameValue)) {
+  if (kind === 'incoming') {
     next = appendFolderSegment(next, INCOMING_FOLDER_NAME);
+  } else if (kind === 'outgoing') {
+    next = appendFolderSegment(next, OUTGOING_FOLDER_NAME);
   } else {
     return folderPath;
   }

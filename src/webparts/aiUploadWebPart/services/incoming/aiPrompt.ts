@@ -59,7 +59,8 @@ function incomingEmailSystemPrompt(): string {
     'Issue Date is that last Sent: or Date:.',
     'Ref No is the value immediately after Our Ref: / 本處檔號. Look in the last email first; if it is not there, copy Our Ref: from the following letter. Do not use Your Ref.',
     'Organization is the left-hand addressee line immediately above a floor line such as 12/F, or if there is no xx/F, immediately above a line containing xxx Road. Do not use the letterhead.',
-    'Leave Project Number empty. Do not invent values.'
+    'Leave Project Number empty in the JSON. It is filled later as {Code}-EOI from Root URL Mapping List after Leading BL is selected.',
+    'Do not invent values.'
   ].join(' ');
 }
 
@@ -151,7 +152,6 @@ function buildIncomingEmailUserPrompt(
   const subjectText = hints && hints.subjectText;
   const refNo = hints && hints.refNo;
   const yourRef = hints && hints.yourRef;
-  const agreementNo = hints && hints.agreementNo;
   const organization = hints && hints.organization;
 
   const sourceLines = hasImage
@@ -207,11 +207,7 @@ function buildIncomingEmailUserPrompt(
   if (yourRef && yourRef.trim()) {
     parts.push('', 'Detected Your Ref. Do not use this for Project Number:', yourRef.trim());
   }
-  if (agreementNo && agreementNo.trim()) {
-    parts.push('', 'Detected Agreement No. / Contract No. Leave Project Number empty; it is resolved from Notification Set-up:', agreementNo.trim());
-  } else {
-    parts.push('', 'Leave Project Number empty.');
-  }
+  parts.push('', 'Leave Project Number empty. The form fills {Code}-EOI from Root URL Mapping List after Leading BL is selected.');
   return parts.join('\n');
 }
 
@@ -242,7 +238,7 @@ function incomingEmailFieldHelp(): string {
     'Name: document name or identifier. Registration Number must use this same value.',
     'Registration Number: always copy Name exactly. Do not invent a different value.',
     'Leading BL: leave empty unless an AECOM business-line name is clearly shown. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water.',
-    'Project Number: leave empty. Do not copy Your Ref, Our Ref, Agreement No., or Contract No. into this field.',
+    'Project Number: leave empty here. The form fills {Code}-EOI from Root URL Mapping List after Leading BL is selected. Do not copy Your Ref, Our Ref, Agreement No., or Contract No.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
     'Organization: in the LEFT addressee address, find a floor line such as 12/F or G/F and copy only the left-hand line immediately above it. If there is no xx/F, find a line containing xxx Road and copy the left-hand line immediately above that. Do not use letterhead.',
     'Sender: the FIRST name in CC: / Cc: / 抄送 on the LAST email-format page only, rewritten as Surname, Given (AAA BBB -> BBB, AAA). Do not use From:. Do not use earlier email pages. Do not use c.c. / 副本 in a following letter.',
