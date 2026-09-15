@@ -69,7 +69,7 @@ export function buildIncomingUserPrompt(
     parts.push('', 'Detected incoming letter type:', letterType);
   }
   if (letterType === 'email') {
-    parts.push('', 'This is an email printout. Use ONLY the last email in the printout (the last From / Sent / To / Subject block, often after Original Message or forwarded content). Ignore earlier emails above it, and ignore any letter that follows the emails for Sender / Receiver / Subject. Sender is the FIRST name in CC: / Cc: / 抄送 on the LAST email-format page only, rewritten as Surname, Given (AAA BBB -> BBB, AAA). Do not use From:, do not use earlier email pages, do not use c.c. / 副本 in the following letter, and do not mix CC names from other emails. Receiver is that last To:. Subject is that last Subject: and STOP at the next title such as Sent: / From: / To: / Attachments:. Issue Date is that last Sent: or Date:. Ref No is the value immediately after Our Ref: / 本處檔號. Look in the last email first; if it is not there, copy Our Ref: from the following letter. Do not use Your Ref.');
+    parts.push('', 'This is an email printout. Use ONLY the last email in the printout (the last From / Sent / To / Subject block, often after Original Message or forwarded content). Ignore earlier emails above it, and ignore any letter that follows the emails for Sender / Receiver / Subject. Sender is the FIRST name in CC: / Cc: / 抄送 on the LAST email-format page only, rewritten as Surname, Given (AAA BBB -> BBB, AAA). Do not use From:, do not use earlier email pages, do not use c.c. / 副本 in the following letter, and do not mix CC names from other emails. Receiver is that last To:. Subject is ONLY the value after Subject: / 主旨: of that last email. STOP before the next title such as Sent: / From: / To: / Attachments:. Do not copy that next title or anything after it. Issue Date is that last Sent: or Date:. Ref No is the value immediately after Our Ref: / 本處檔號. Look in the last email first; if it is not there, copy Our Ref: from the following letter. Do not use Your Ref.');
     if (signature && signature.senderName) {
       parts.push('', 'Detected Sender from CC: on the last email-format page only:', signature.senderName);
     }
@@ -102,7 +102,7 @@ export function buildIncomingUserPrompt(
     parts.push(
       '',
       letterType === 'email'
-        ? 'Detected Subject from the last email Subject: line. Stop at the next title. Use this text:'
+        ? 'Detected Subject from the last email Subject: only. Stop before the next title. Use this text:'
         : 'Detected Subject from bold+underline text after Dear. It may start mid-line and continue on the next line. Use this text:',
       subjectText.trim()
     );
@@ -137,7 +137,7 @@ function incomingFieldHelp(): string {
     'Organization: in the LEFT addressee address above Dear / 敬啟者, find a floor line such as 12/F or G/F and copy only the left-hand line immediately above it. If there is no xx/F, find a line containing xxx Road and copy the left-hand line immediately above that. Do not include Our Ref, Your Ref, Date, or other text on the right of that row. Do not use letterhead.',
     'Sender: copy ONLY the text inside the parentheses immediately below Yours faithfully / Yours sincerely / Yours truly / 署名, e.g. (Ben xXx. LXX) -> Ben xXx. LXX. Look on the page that contains that closing, which is often the last page, not the first page. Skip (signed). Do not copy CC / c.c. / 副本 / copy to names, whether they sit below the signature. Do not copy parentheses from Attn: near the top of page 1. Do not copy the job title under the parentheses. For a memo, use From:. For an email printout, use the FIRST name in CC: / Cc: / 抄送 on the LAST email-format page, rewritten as Surname, Given (AAA BBB -> BBB, AAA).',
     'Receiver: if Attn: / Attn : / Attention: is present, copy only the value after that label. If there is no Attn, copy the first left-hand address line above Dear / 敬啟者. Do not use the line below Yours faithfully. Ignore Our Ref / Date on the right of the same row. For an email printout, copy the To: / 收件人 value of the LAST email only.',
-    'Subject:\n' + OUTGOING_SUBJECT_PROMPT + '\nIncoming extra: the heading may start on the latter part of a line after Dear and continue on the next line. Copy from that latter part through the next line. Do not copy the unstyled left-hand prefix.',
+    'Subject:\n' + OUTGOING_SUBJECT_PROMPT + '\nIncoming extra: the heading may start on the latter part of a line after Dear and continue on the next line. Copy from that latter part through the next line. Do not copy the unstyled left-hand prefix. For an email printout, copy ONLY the value after Subject: / 主旨: of the last email, and STOP before the next title such as Sent: / From: / To: / Attachments:. Do not copy that next title.',
     'File No: file number if shown separately from Ref No.',
     'Ref No: copy the value to the right of Our Ref: / 本處檔號 / 檔號. OCR may read Ref as Rref or Reef. Do not use Your Ref. For an email printout, copy the value after Our Ref: in the last email, or if it is not in the email, from the following letter.',
     'Issue Date: the document date in dd/MM/yyyy, for example 03/09/2026. Accept 8 September 2026 and 2026年9月8日.',

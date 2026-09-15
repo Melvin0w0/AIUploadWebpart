@@ -10,6 +10,7 @@ import {
   extractIncomingEmailCcFromLastPage,
   extractIncomingEmailHeaders,
   extractIncomingEmailOurRef,
+  extractIncomingEmailSubjectFromLastPage,
   extractIncomingEmailToFromLastPage,
   incomingLastEmailPages,
   incomingPagesLookLikeEmail
@@ -49,14 +50,18 @@ export async function detectIncomingFields(pages: IOcrPageResult[]): Promise<IDe
   const organization = tryPicked(() => extractIncomingOrganizationLocated(firstPage));
   detected.organization = organization.value;
   detected.sources.organization = organization.source;
-  detected.subjectText = email && email.subject
-    ? email.subject
-    : tryText(() => extractIncomingSubject(firstPage));
-  if (!detected.subjectText && !looksEmail) {
-    detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
-  }
-  if (detected.subjectText) {
-    detected.sources.subject = looksEmail ? 'Email Subject' : 'Dear 後粗體+底線';
+  if (looksEmail) {
+    const emailSubject = extractIncomingEmailSubjectFromLastPage(list);
+    detected.subjectText = emailSubject;
+    detected.sources.subject = emailSubject ? 'Email Subject' : '';
+  } else {
+    detected.subjectText = tryText(() => extractIncomingSubject(firstPage));
+    if (!detected.subjectText) {
+      detected.subjectText = await tryTextAsync(() => extractSubjectBelowDearSir(firstPage));
+    }
+    if (detected.subjectText) {
+      detected.sources.subject = 'Dear 後粗體+底線';
+    }
   }
   detected.refNo = looksEmail
     ? (extractIncomingEmailOurRef(list) || tryText(() => extractOurRefOnly(list)))

@@ -124,6 +124,27 @@ export function extractIncomingEmailToFromLastPage(pages?: IOcrPageResult[]): st
   return extractHeaderFromLastEmailPage(pages, 'to');
 }
 
+export function extractIncomingEmailSubjectFromLastPage(pages?: IOcrPageResult[]): string {
+  const list = pages || [];
+  const lastIndex = lastIncomingEmailFormatPageIndex(list);
+  if (lastIndex < 0) {
+    return subjectValueUntilNextTitle(incomingLastEmailText(list));
+  }
+  const pageText = incomingEmailPlainText(list[lastIndex]);
+  const fromPage = subjectValueUntilNextTitle(sliceLastIncomingEmail(clipEmailBeforeLetter(pageText)));
+  if (fromPage) {
+    return fromPage;
+  }
+  if (lastIndex > 0) {
+    const joined = (incomingEmailPlainText(list[lastIndex - 1]) + ' ' + pageText).replace(/\s+/g, ' ').trim();
+    const fromJoined = subjectValueUntilNextTitle(sliceLastIncomingEmail(clipEmailBeforeLetter(joined)));
+    if (fromJoined) {
+      return fromJoined;
+    }
+  }
+  return subjectValueUntilNextTitle(incomingLastEmailText(list));
+}
+
 export function extractIncomingEmailOurRef(pages?: IOcrPageResult[]): string {
   const list = pages || [];
   const lastEmailIndex = lastIncomingEmailFormatPageIndex(list);
@@ -158,7 +179,7 @@ export function extractIncomingEmailHeaders(pages?: IOcrPageResult[]): IIncoming
     from: incomingEmailPersonName(extractIncomingEmailHeaderValue(headers, 'from')),
     to: extractIncomingEmailToFromLastPage(pages) || incomingEmailPersonName(extractIncomingEmailHeaderValue(headers, 'to')),
     cc: extractIncomingEmailCcFromLastPage(pages) || incomingEmailCcSenderName(extractIncomingEmailHeaderValue(headers, 'cc')),
-    subject: extractIncomingEmailSubjectFromText(headers),
+    subject: extractIncomingEmailSubjectFromLastPage(pages),
     sent: parseIncomingEmailSentDate(
       extractIncomingEmailHeaderValue(headers, 'sent') || extractIncomingEmailHeaderValue(headers, 'date')
     ),
@@ -384,15 +405,33 @@ function findSecondIncomingEmailHeader(text: string): number {
 }
 
 function extractIncomingEmailSubjectFromText(text: string): string {
-  if (!text) {
+  return subjectValueUntilNextTitle(text);
+}
+
+function subjectValueUntilNextTitle(text: string): string {
+  const source = (text || '').replace(/\s+/g, ' ').trim();
+  if (!source) {
     return '';
   }
-  const fromSubject = extractIncomingEmailHeaderValue(text, 'subject');
-  if (fromSubject) {
-    return fromSubject;
+  const label = /(?:^|\s)(?:subject|主旨|事由)\s*[:：]\s*/ig;
+  let last: RegExpExecArray | null = null;
+  let match = label.exec(source);
+  while (match) {
+    last = match;
+    match = label.exec(source);
   }
-  return firstNonHeaderEmailTitleValue(text);
+  if (!last || last.index === undefined) {
+    return '';
+  }
+  let value = source.substring(last.index + last[0].length);
+  const nextTitle = value.search(NEXT_EMAIL_HEADER_TITLE);
+  if (nextTitle >= 0) {
+    value = value.substring(0, nextTitle);
+  }
+  return value.replace(/\s+/g, ' ').trim();
 }
+
+const NEXT_EMAIL_HEADER_TITLE = /(?:^|\s)(?:from|sent|to|cc|bcc|date|subject|attachments?|importance|reply-to|sensitivity|thread-topic|thread-index|發件人|寄件人|收件人|主旨|附件|抄送|發送時間)\s*[:：]|[A-Za-z](?:Sent|From|To|Cc|Bcc|Date|Subject|Attachments?|Importance|Reply-To)\s*[:：]|\b(?:Sent|From|To|Cc|Bcc|Date|Subject|Attachments?|Importance|Reply-To)\s*[:：]/;
 
 function extractIncomingEmailHeaderValue(
   text: string,
