@@ -3,7 +3,6 @@ import { formatIssueDate, parseIssueDate } from '../../constants/issueDate';
 import { IPickedValue, picked } from '../correspondenceTypes';
 import { IOcrPageResult, IOcrWord } from '../IPdfOcr';
 import { formatOcrTextWithStyles, joinOcrWords } from '../ocrSelection';
-import { looksLikeIncomingEmail } from './email';
 import { SUBJECT } from '../ocrWordStyles';
 
 const DATE_LABELS: string[] = ['Date', '日期'];
@@ -26,7 +25,7 @@ interface ILine {
   words?: IOcrWord[];
 }
 
-export type IncomingLetterType = 'government' | 'consultant' | 'chinese' | 'memo' | 'email' | 'unknown';
+export type IncomingLetterType = 'government' | 'consultant' | 'chinese' | 'memo' | 'unknown';
 
 export interface IIncomingClassification {
   letterType: IncomingLetterType;
@@ -863,9 +862,6 @@ function isIncomingMetaHeader(line: string): boolean {
 }
 
 function detectLetterType(text: string, hasOurRef: boolean): IncomingLetterType {
-  if (looksLikeIncomingEmail(text)) {
-    return 'email';
-  }
   if (/\b(?:memorandum|circular|fax\s+cover)\b/i.test(text) || /內部通告|通函/.test(text)) {
     return 'memo';
   }

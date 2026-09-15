@@ -53,16 +53,25 @@ export function createIncomingOcrDecider(): (
   previous: IOcrPageResult | undefined,
   current: IOcrPageResult
 ) => OcrPageDecision {
-  let emailMode = false;
+  let format: 'unknown' | 'email' | 'letter' = 'unknown';
   let letterAfterEmail = false;
   return (previous, current) => {
-    const isEmailPage = incomingPageIsEmailSegment(previous, current);
-    const continuation = emailMode && !letterAfterEmail && incomingPageLooksLikeEmailContinuation(previous, current);
-    if (!letterAfterEmail && (isEmailPage || continuation)) {
-      emailMode = true;
+    if (format === 'unknown') {
+      if (incomingPageIsEmailSegment(previous, current)) {
+        format = 'email';
+        return 'keep-continue';
+      }
+      format = 'letter';
+      return incomingPageHasClosing(current.text) ? 'keep-stop' : 'keep-continue';
+    }
+    if (format === 'letter') {
+      return incomingPageHasClosing(current.text) ? 'keep-stop' : 'keep-continue';
+    }
+    const continuation = !letterAfterEmail && incomingPageLooksLikeEmailContinuation(previous, current);
+    if (!letterAfterEmail && continuation) {
       return 'keep-continue';
     }
-    if (emailMode && !letterAfterEmail) {
+    if (!letterAfterEmail) {
       if (incomingPageLooksLikeFollowingLetter(current) || incomingPageHasOurRef(current)) {
         letterAfterEmail = true;
         return (incomingPageHasOurRef(current) || incomingPageHasClosing(current.text))
@@ -71,15 +80,9 @@ export function createIncomingOcrDecider(): (
       }
       return 'drop-stop';
     }
-    if (letterAfterEmail) {
-      return (incomingPageHasOurRef(current) || incomingPageHasClosing(current.text))
-        ? 'keep-stop'
-        : 'keep-continue';
-    }
-    if (incomingPageHasClosing(current.text) && !incomingPageBottomLooksLikeEmail(current)) {
-      return 'keep-stop';
-    }
-    return 'keep-continue';
+    return (incomingPageHasOurRef(current) || incomingPageHasClosing(current.text))
+      ? 'keep-stop'
+      : 'keep-continue';
   };
 }
 

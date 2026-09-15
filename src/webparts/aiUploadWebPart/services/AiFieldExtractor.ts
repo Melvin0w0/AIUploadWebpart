@@ -34,7 +34,8 @@ export async function extractFieldsWithAi(
     hints && hints.page,
     hints && hints.signature,
     hints && hints.kind,
-    hints && hints.closingPage
+    hints && hints.closingPage,
+    hints && hints.letterType
   );
   if (!clipped && images.length === 0) {
     return {};
@@ -124,7 +125,7 @@ function buildRequest(
     messages: [
       {
         role: 'system',
-        content: incoming ? incomingSystemPrompt() : outgoingSystemPrompt()
+        content: incoming ? incomingSystemPrompt(hints && hints.letterType) : outgoingSystemPrompt()
       },
       {
         role: 'user',
@@ -161,7 +162,8 @@ async function buildPageImages(
   page?: IOcrPageResult,
   signature?: ISignatureAnalysis,
   kind?: CorrespondenceKind,
-  closingPage?: IOcrPageResult
+  closingPage?: IOcrPageResult,
+  letterType?: string
 ): Promise<IChatImage[]> {
   const source = page && page.imageUrl ? page.imageUrl.trim() : '';
   if (!source) {
@@ -175,7 +177,8 @@ async function buildPageImages(
     if (fullPage) {
       images.push({ url: fullPage, detail: 'low', label: 'Full first page:' });
     }
-    if (kind === 'incoming') {
+    const incomingEmail = kind === 'incoming' && letterType === 'email';
+    if (kind === 'incoming' && !incomingEmail) {
       const headHeight = Math.max(80, Math.round(image.height * 0.22));
       const letterhead = encodeImageRegion(image, 0, 0, image.width, headHeight, 1280, 0.78);
       if (letterhead) {
@@ -186,28 +189,30 @@ async function buildPageImages(
         });
       }
     }
-    const band = dearSirBandRegion(page);
-    if (band) {
-      const crop = encodeImageRegion(
-        image,
-        band.x0,
-        band.y0,
-        Math.max(8, band.x1 - band.x0),
-        Math.max(8, band.y1 - band.y0),
-        1280,
-        0.78
-      );
-      if (crop) {
-        images.push({
-          url: crop,
-          detail: 'high',
-          label: kind === 'incoming' ? incomingBodyImageLabel() : outgoingBodyImageLabel()
-        });
+    if (!incomingEmail) {
+      const band = dearSirBandRegion(page);
+      if (band) {
+        const crop = encodeImageRegion(
+          image,
+          band.x0,
+          band.y0,
+          Math.max(8, band.x1 - band.x0),
+          Math.max(8, band.y1 - band.y0),
+          1280,
+          0.78
+        );
+        if (crop) {
+          images.push({
+            url: crop,
+            detail: 'high',
+            label: kind === 'incoming' ? incomingBodyImageLabel() : outgoingBodyImageLabel()
+          });
+        }
       }
     }
     const region = signature && signature.region;
     const regionPage = signature && signature.regionPageNumber;
-    if (region && (!regionPage || !page || regionPage === page.pageNumber)) {
+    if (!incomingEmail && region && (!regionPage || !page || regionPage === page.pageNumber)) {
       const below = Math.max(110, Math.round(image.height * 0.12));
       const sx = Math.max(0, region.x0 - 12);
       const sy = Math.max(0, region.y0 - 8);
