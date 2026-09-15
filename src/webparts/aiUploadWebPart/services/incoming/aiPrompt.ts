@@ -42,7 +42,7 @@ function incomingLetterSystemPrompt(): string {
     'Sender is exactly the text inside the parentheses immediately below Yours faithfully / Yours sincerely / Yours truly / 署名, for example (Ben xXx. LXX) -> Ben xXx. LXX. That closing is often on the last page, not page 1. Skip (signed). Do not copy CC / c.c. / 副本 names below the signature. Do not copy parentheses from Attn or the address on page 1. Do not copy the job title under the parentheses.',
     'Receiver is the Attn value when Attn / Attention is present. If there is no Attn, Receiver is the first left-hand address line above Dear / 敬啟者.',
     'Ref No is Our Ref / 本處檔號 / 檔號 of the originating party, not Your Ref.',
-    'Leave Project Number empty. Do not take it from Your Ref or Our Ref.',
+    'Leave Project Number and Leading BL empty. They are filled from Notification Set-up by matching the text between Dear and Subject to Project Name. Do not take Project Number from Your Ref or Our Ref.',
     'Do not invent values.'
   ].join(' ') + '\nSubject:\n' + OUTGOING_SUBJECT_PROMPT + '\nIncoming extra: the Subject heading may start on the latter part of a line after Dear (right of Dear Sir, or after unstyled words on the left) and continue on the next line. Copy from that latter part through the following line. Do not copy the unstyled left-hand prefix.';
 }
@@ -76,6 +76,7 @@ function buildIncomingLetterUserPrompt(
   const refNo = hints && hints.refNo;
   const yourRef = hints && hints.yourRef;
   const agreementNo = hints && hints.agreementNo;
+  const projectNameHint = hints && hints.projectNameHint;
   const organization = hints && hints.organization;
   const letterType = hints && hints.letterType;
 
@@ -133,10 +134,12 @@ function buildIncomingLetterUserPrompt(
   if (yourRef && yourRef.trim()) {
     parts.push('', 'Detected Your Ref. Do not use this for Project Number:', yourRef.trim());
   }
-  if (agreementNo && agreementNo.trim()) {
+  if (projectNameHint && projectNameHint.trim()) {
+    parts.push('', 'Detected text between Dear and Subject. Leave Project Number and Leading BL empty; the form matches this text to Notification Set-up Project Name:', projectNameHint.trim());
+  } else if (agreementNo && agreementNo.trim()) {
     parts.push('', 'Detected Agreement No. / Contract No. below Dear and above Subject. Leave Project Number empty; it is resolved from Notification Set-up:', agreementNo.trim());
   } else {
-    parts.push('', 'Look below Dear and above Subject for Agreement No. or Contract No:. Copy the text after that label only as context. Leave Project Number empty.');
+    parts.push('', 'Look below Dear and above Subject. Leave Project Number and Leading BL empty; they are filled from Notification Set-up when that text is similar to Project Name.');
   }
   return parts.join('\n');
 }
@@ -215,8 +218,8 @@ function incomingLetterFieldHelp(): string {
   return [
     'Name: document name or identifier. Registration Number must use this same value.',
     'Registration Number: always copy Name exactly. Do not invent a different value.',
-    'Leading BL: leave empty unless an AECOM business-line name is clearly shown. Must be one of: Architecture, Building Engineering, Environment, Geotechnical, Digital, Land Supply and Municipal, MEP, Project and Construction Management, Program, Cost and Consultancy, Transportation, Unclassified, Urbanism and Planning, Water.',
-    'Project Number: leave empty. Do not copy Your Ref, Our Ref, Agreement No., or Contract No. into this field.',
+    'Leading BL: leave empty. The form fills it from Notification Set-up after matching the text between Dear and Subject to Project Name.',
+    'Project Number: leave empty. The form fills it from Notification Set-up Project No when the text between Dear and Subject is similar to Project Name. Do not copy Your Ref, Our Ref, Agreement No., or Contract No. into this field.',
     'Sub-Project Number: dropdown value None, or an integer from 1 to 99. Use None when it is not shown.',
     'Organization: in the LEFT addressee address above Dear / 敬啟者, find a floor line such as 12/F or G/F and copy only the left-hand line immediately above it. If there is no xx/F, find a line containing xxx Road and copy the left-hand line immediately above that. Do not include Our Ref, Your Ref, Date, or other text on the right of that row. Do not use letterhead.',
     'Sender: copy ONLY the text inside the parentheses immediately below Yours faithfully / Yours sincerely / Yours truly / 署名, e.g. (Ben xXx. LXX) -> Ben xXx. LXX. Look on the page that contains that closing, which is often the last page, not the first page. Skip (signed). Do not copy CC / c.c. / 副本 / copy to names, whether they sit below the signature. Do not copy parentheses from Attn: near the top of page 1. Do not copy the job title under the parentheses. For a memo, use From:.',

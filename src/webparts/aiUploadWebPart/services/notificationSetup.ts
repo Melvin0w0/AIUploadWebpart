@@ -242,36 +242,59 @@ export async function lookupNotificationSetupByProjectName(
       return { leadingBl: '' };
     }
 
+    const seen: { [id: string]: { [key: string]: unknown } } = {};
     const candidates = projectNameCandidates(fragment);
     for (let i = 0; i < candidates.length; i++) {
       try {
-        const item = await queryMatchingItemByProjectName(
+        const items = await queryMatchingItemsByProjectName(
           http,
           resolved.siteUrl,
           resolved.listTitle,
           resolved.columns,
           candidates[i]
         );
-        if (!item) {
-          continue;
-        }
-        const projectNumber = sanitizeProjectNumber(
-          readFieldText(item, resolved.columns.namedProjectNumberInternal) ||
-          readFieldText(item, resolved.columns.projectNoInternal)
-        );
-        if (projectNumber) {
-          return { leadingBl: '', projectNumber };
-        }
+        items.forEach((item) => {
+          const id = String(itemId(item) || readFieldText(item, resolved.columns.projectNameInternal));
+          if (id && !seen[id]) {
+            seen[id] = item;
+          }
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (isThresholdError(message)) {
           return { leadingBl: '', thresholdExceeded: true };
         }
-        if (i === candidates.length - 1) {
-          return { leadingBl: '' };
-        }
       }
     }
+
+    const scored = Object.keys(seen).map((key) => {
+      const item = seen[key];
+      const projectName = readFieldText(item, resolved.columns.projectNameInternal);
+      return {
+        item,
+        projectName,
+        score: projectNameSimilarity(fragment, projectName)
+      };
+    }).filter((entry) => entry.projectName && entry.score >= PROJECT_NAME_SIMILARITY).sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return right.projectName.length - left.projectName.length;
+    });
+
+    const best = scored[0];
+    if (!best) {
+      return { leadingBl: '' };
+    }
+    const projectNumber = sanitizeProjectNumber(
+      readFieldText(best.item, resolved.columns.namedProjectNumberInternal) ||
+      readFieldText(best.item, resolved.columns.projectNoInternal)
+    );
+    const leadingBl = canonicalLeadingBl(readFieldText(best.item, resolved.columns.leadingBlInternal));
+    if (!projectNumber && !leadingBl) {
+      return { leadingBl: '' };
+    }
+    return { leadingBl, projectNumber };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (isThresholdError(message)) {
@@ -281,6 +304,8 @@ export async function lookupNotificationSetupByProjectName(
 
   return { leadingBl: '' };
 }
+
+const PROJECT_NAME_SIMILARITY: number = 0.6;
 
 async function resolveList(
   http: SPHttpClient,
@@ -378,15 +403,18 @@ async function queryMatchingItem(
   return queryByRestFilter(http, siteUrl, listTitle, columns, projectNo);
 }
 
-async function queryMatchingItemByProjectName(
+async function queryMatchingItemsByProjectName(
   http: SPHttpClient,
   siteUrl: string,
   listTitle: string,
   columns: IListColumns,
   projectNameFragment: string
-): Promise<{ [key: string]: unknown } | undefined> {
+): Promise<{ [key: string]: unknown }[]> {
   try {
-    return await queryByProjectNameCaml(http, siteUrl, listTitle, columns, projectNameFragment);
+    const items = await queryByProjectNameCaml(http, siteUrl, listTitle, columns, projectNameFragment);
+    if (items.length > 0) {
+      return items;
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (isThresholdError(message)) {
@@ -484,7 +512,7 @@ async function queryByProjectNameCaml(
   listTitle: string,
   columns: IListColumns,
   projectNameFragment: string
-): Promise<{ [key: string]: unknown } | undefined> {
+): Promise<{ [key: string]: unknown }[]> {
   const viewXml =
     `<View Scope="RecursiveAll">` +
     `<Query><Where><Contains>` +
@@ -500,7 +528,7 @@ async function queryByProjectNameCaml(
       ? `<FieldRef Name="${columns.projectNoInternal}"/>`
       : '') +
     `</ViewFields>` +
-    `<RowLimit>1</RowLimit>` +
+    `<RowLimit>20</RowLimit>` +
     `</View>`;
 
   const url =
@@ -519,7 +547,7 @@ async function queryByProjectNameCaml(
     })
   });
   await ensureOk(response, `Could not query "${listTitle}".`);
-  return firstItem(await response.json());
+  return itemsFromJson(await response.json());
 }
 
 async function queryByProjectNameRestFilter(
@@ -528,7 +556,7 @@ async function queryByProjectNameRestFilter(
   listTitle: string,
   columns: IListColumns,
   projectNameFragment: string
-): Promise<{ [key: string]: unknown } | undefined> {
+): Promise<{ [key: string]: unknown }[]> {
   const filter = `substringof('${escapeOData(projectNameFragment)}', ${columns.projectNameInternal})`;
   const isLookup = isLookupType(columns.leadingBlType);
   const selectParts: string[] = [
@@ -544,7 +572,7 @@ async function queryByProjectNameRestFilter(
     `${trimSlash(siteUrl)}/_api/web/lists/GetByTitle('${escapeOData(listTitle)}')` +
     `/items?$filter=${encodeURIComponent(filter)}` +
     `&$select=${selectParts.join(',')}` +
-    `&$top=1`;
+    `&$top=20`;
   if (isLookup) {
     url += `&$expand=${columns.leadingBlInternal}`;
   }
@@ -555,7 +583,14 @@ async function queryByProjectNameRestFilter(
     }
   });
   await ensureOk(response, `Could not query "${listTitle}".`);
-  return firstItem(await response.json());
+  return itemsFromJson(await response.json());
+}
+
+function itemsFromJson(json: {
+  value?: { [key: string]: unknown }[];
+  d?: { results?: { [key: string]: unknown }[] };
+}): { [key: string]: unknown }[] {
+  return json.value || (json.d && json.d.results) || [];
 }
 
 function firstItem(json: {
@@ -706,14 +741,172 @@ function projectNameCandidates(fragment: string): string[] {
   const results: string[] = [];
   const push = (value: string): void => {
     const text = (value || '').replace(/\s+/g, ' ').trim();
-    if (text && text.length >= 4 && /\d/.test(text) && results.indexOf(text) < 0) {
-      results.push(text);
+    if (!text || text.length < 4 || results.indexOf(text) >= 0 || isProjectNameStopPhrase(text)) {
+      return;
     }
+    results.push(text.length > 48 ? text.substring(0, 48).trim() : text);
   };
-  push(fragment);
-  push(fragment.replace(/\s*\([^)]*\)\s*$/, ''));
-  push(fragment.replace(/\s*\/\s*/g, '/').replace(/\s*-\s*/g, '-'));
-  return results;
+
+  const agreement = fragment.match(
+    /(?:agreement\s*(?:no\.?|number)|contract\s*(?:no\.?|number)|agmt\.?\s*no\.?|agt\.?\s*no\.?|合約編號|合同編號)\s*[:.\-\uFF1A]?\s*([A-Za-z0-9][A-Za-z0-9/.\-]{3,})/i
+  );
+  if (agreement && agreement[1]) {
+    push(agreement[1]);
+  }
+  const numbered = fragment.match(/[A-Za-z]{0,8}\d[\dA-Za-z/.\-]{3,}/g) || [];
+  numbered.slice(0, 2).forEach((part) => push(part));
+
+  const words = fragment
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .split(/[^A-Za-z0-9\u4e00-\u9fff]+/)
+    .filter((word) => !!word);
+  const windows: string[] = [];
+  for (let size = 4; size >= 2; size--) {
+    for (let index = 0; index + size <= words.length; index++) {
+      const window = words.slice(index, index + size).join(' ');
+      if (hasProjectNameContent(window) && windows.indexOf(window) < 0) {
+        windows.push(window);
+      }
+    }
+  }
+  windows.sort((left, right) => projectNameCandidateScore(right) - projectNameCandidateScore(left));
+  windows.forEach((window) => push(window));
+
+  words
+    .filter((word) => word.length >= 6 && !isProjectNameStopPhrase(word))
+    .sort((left, right) => right.length - left.length)
+    .forEach((word) => {
+      push(word);
+      if (/[\u4e00-\u9fff]/.test(word) && word.length > 8) {
+        push(word.substring(0, 8));
+      }
+    });
+
+  if (fragment.replace(/\s+/g, ' ').trim().length <= 48) {
+    push(fragment);
+  }
+  return results.slice(0, 8);
+}
+
+function isProjectNameStopPhrase(value: string): boolean {
+  const text = (value || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ').trim();
+  if (!text) {
+    return true;
+  }
+  const stops: { [key: string]: boolean } = {
+    agreement: true,
+    contract: true,
+    number: true,
+    subject: true,
+    regarding: true,
+    captioned: true,
+    dear: true,
+    sir: true,
+    sirs: true,
+    madam: true,
+    mesdames: true,
+    letter: true,
+    dated: true,
+    project: true
+  };
+  const tokens = text.split(' ').filter((token) => token.length >= 2);
+  return tokens.length > 0 && tokens.every((token) => !!stops[token] || token === 'no' || token === 'the' || token === 'and' || token === 'for' || token === 'of');
+}
+
+function hasProjectNameContent(value: string): boolean {
+  return !isProjectNameStopPhrase(value);
+}
+
+function projectNameCandidateScore(value: string): number {
+  const tokens = (value || '').toLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/).filter((token) => token.length >= 2);
+  const stops: { [key: string]: boolean } = {
+    agreement: true,
+    contract: true,
+    number: true,
+    subject: true,
+    regarding: true,
+    captioned: true,
+    dear: true,
+    sir: true,
+    sirs: true,
+    madam: true,
+    no: true,
+    the: true,
+    and: true,
+    for: true,
+    of: true,
+    to: true,
+    at: true,
+    in: true,
+    on: true
+  };
+  const content = tokens.filter((token) => !stops[token]);
+  return content.length * 10 + content.join('').length;
+}
+
+function projectNameSimilarity(source: string, projectName: string): number {
+  const left = normalizeProjectName(source);
+  const right = normalizeProjectName(projectName);
+  if (!left || !right) {
+    return 0;
+  }
+  if (left === right) {
+    return 1;
+  }
+  if (left.indexOf(right) >= 0 || right.indexOf(left) >= 0) {
+    return 0.95;
+  }
+  const a = projectNameTokens(left);
+  const b = projectNameTokens(right);
+  let tokenScore = 0;
+  if (a.length > 0 && b.length > 0) {
+    let overlap = 0;
+    a.forEach((token) => {
+      if (b.indexOf(token) >= 0) {
+        overlap += 1;
+      }
+    });
+    const coverage = overlap / Math.min(a.length, b.length);
+    const jaccard = overlap / (a.length + b.length - overlap);
+    tokenScore = Math.max(coverage, jaccard);
+  }
+  return Math.max(tokenScore, cjkProjectNameSimilarity(left, right));
+}
+
+function cjkProjectNameSimilarity(left: string, right: string): number {
+  const a = (left || '').replace(/[^\u4e00-\u9fff]/g, '');
+  const b = (right || '').replace(/[^\u4e00-\u9fff]/g, '');
+  if (a.length < 4 || b.length < 4) {
+    return 0;
+  }
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length <= b.length ? b : a;
+  if (longer.indexOf(shorter) >= 0) {
+    return 0.95;
+  }
+  let hit = 0;
+  for (let index = 0; index + 2 <= shorter.length; index++) {
+    if (longer.indexOf(shorter.substring(index, index + 2)) >= 0) {
+      hit += 1;
+    }
+  }
+  return hit / Math.max(1, shorter.length - 1);
+}
+
+function normalizeProjectName(value: string): string {
+  return (value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function projectNameTokens(value: string): string[] {
+  return (value || '')
+    .split(' ')
+    .filter((token) => token.length >= 2)
+    .filter((token, index, list) => list.indexOf(token) === index);
 }
 
 function isNumericType(typeAsString: string): boolean {

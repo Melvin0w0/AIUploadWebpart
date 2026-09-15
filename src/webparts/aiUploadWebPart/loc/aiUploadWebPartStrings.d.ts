@@ -112,6 +112,8 @@ declare interface IAiUploadWebPartStrings {
   OutgoingLabel: string;
   IncomingNoAutoFillHint: string;
   IncomingProjectNumberDescription: string;
+  IncomingDearToSubjectLabel: string;
+  IncomingDearToSubjectEmpty: string;
   NotificationSetupThresholdHint: string;
   UploadTypeLabel: string;
   UploadTypeNormal: string;

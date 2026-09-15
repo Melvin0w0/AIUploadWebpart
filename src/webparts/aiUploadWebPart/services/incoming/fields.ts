@@ -1,4 +1,5 @@
 // Incoming Convert rules only. Outgoing lives in services/outgoing/.
+import { isLeadingBlField } from '../../constants/blSiteMap';
 import { isOrganizationField, isReceiverField, isRefNoField, isSenderField, isSubjectField } from '../../constants/defaultFormFields';
 import { isIssueDateField } from '../../constants/issueDate';
 import { isProjectNumberField } from '../../constants/projectNumber';
@@ -18,6 +19,7 @@ import {
 import {
   classifyIncomingLetter,
   extractIncomingAgreementNo,
+  extractIncomingDearToSubjectText,
   extractIncomingIssueDate,
   extractIncomingMemoSender,
   extractIncomingOrganizationLocated,
@@ -70,6 +72,10 @@ async function detectIncomingLetterFields(pages: IOcrPageResult[]): Promise<IDet
   detected.agreementNo = tryText(() => extractIncomingAgreementNo(firstPage));
   if (detected.agreementNo) {
     detected.sources.agreementNo = 'Agreement / Contract No.';
+  }
+  detected.projectNameHint = tryText(() => extractIncomingDearToSubjectText(firstPage)) || detected.agreementNo;
+  if (detected.projectNameHint) {
+    detected.sources.projectNameHint = 'Dear 至 Subject';
   }
   detected.issueDate = tryText(() => extractIncomingIssueDate(list));
   if (detected.issueDate) {
@@ -177,7 +183,7 @@ function pickIncomingLetterFieldValue(
     }
     return picked((aiValue || '').trim(), 'AI');
   }
-  if (isProjectNumberField(label)) {
+  if (isProjectNumberField(label) || isLeadingBlField(label)) {
     return picked('', '');
   }
   if (isOrganizationField(label)) {
@@ -267,6 +273,7 @@ export function incomingAiHints(detected: IDetectedFields): IAiExtractionHints {
     refNo: detected.refNo,
     yourRef: detected.yourRef,
     agreementNo: detected.agreementNo,
+    projectNameHint: detected.projectNameHint,
     organization: detected.organization,
     kind: 'incoming',
     letterType: detected.letterType

@@ -17,6 +17,7 @@ export interface IDetectedFields {
   yourRef: string;
   projectNumber: string;
   agreementNo: string;
+  projectNameHint: string;
   organization: string;
   issueDate: string;
   memoSender: string;
@@ -33,6 +34,7 @@ export interface IAiExtractionHints {
   refNo?: string;
   yourRef?: string;
   agreementNo?: string;
+  projectNameHint?: string;
   organization?: string;
   kind?: CorrespondenceKind;
   letterType?: string;
@@ -52,6 +54,7 @@ export function emptyDetectedFields(firstPage?: IOcrPageResult): IDetectedFields
     yourRef: '',
     projectNumber: '',
     agreementNo: '',
+    projectNameHint: '',
     organization: '',
     issueDate: '',
     memoSender: '',

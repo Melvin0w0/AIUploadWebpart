@@ -132,6 +132,138 @@ interface IAiUploadState {
   uploadType: UploadType;
   labelType: LabelType;
   incomingLetterType: string;
+  dearToSubjectText: string;
+}
+
+interface IChoiceOption {
+  key: string;
+  text: string;
+}
+
+interface IChoiceGroupProps {
+  label: string;
+  selected: string;
+  options: IChoiceOption[];
+  onChange: (key: string) => void;
+  disabled: boolean;
+  className?: string;
+}
+
+interface IChoiceThumb {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function AppleChoiceGroup(props: IChoiceGroupProps): React.ReactElement {
+  const trackRef = React.useRef<HTMLDivElement>(null);
+  const selectedRef = React.useRef<HTMLButtonElement>(null);
+  const [thumb, setThumb] = React.useState<IChoiceThumb>({ x: 0, y: 0, width: 0, height: 0 });
+  const [thumbReady, setThumbReady] = React.useState<boolean>(false);
+  const optionSignature = props.options.map((option) => option.key + ':' + option.text).join('|');
+
+  const syncThumb = React.useCallback((): void => {
+    const track = trackRef.current;
+    const button = selectedRef.current;
+    if (!track || !button) {
+      return;
+    }
+    const trackBox = track.getBoundingClientRect();
+    const buttonBox = button.getBoundingClientRect();
+    setThumb({
+      x: buttonBox.left - trackBox.left,
+      y: buttonBox.top - trackBox.top,
+      width: buttonBox.width,
+      height: buttonBox.height
+    });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    syncThumb();
+    const frame = window.requestAnimationFrame(() => {
+      setThumbReady(true);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [props.selected, optionSignature, syncThumb]);
+
+  React.useEffect(() => {
+    const track = trackRef.current;
+    if (!track) {
+      return;
+    }
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        syncThumb();
+      });
+      observer.observe(track);
+      return () => {
+        observer.disconnect();
+      };
+    }
+    const onResize = (): void => {
+      syncThumb();
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }, [syncThumb]);
+
+  const pulseTrack = (target: HTMLElement): void => {
+    const group = target.closest(`.${styles.choiceTrack}`) as HTMLElement | null;
+    if (!group || typeof group.animate !== 'function') {
+      return;
+    }
+    group.animate(
+      [
+        { transform: 'scale(1)' },
+        { transform: 'scale(0.98)', offset: 0.32 },
+        { transform: 'scale(1)' }
+      ],
+      { duration: 320, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' }
+    );
+  };
+
+  return (
+    <div className={`${styles.choiceGroup} ${props.className || ''}`.trim()}>
+      <div className={styles.choiceLabel}>{props.label}</div>
+      <div ref={trackRef} className={styles.choiceTrack} role="radiogroup" aria-label={props.label}>
+        <span
+          className={`${styles.choiceThumb} ${thumbReady ? styles.choiceThumbReady : ''}`}
+          style={{
+            width: thumb.width,
+            height: thumb.height,
+            transform: `translate(${thumb.x}px, ${thumb.y}px)`
+          }}
+          aria-hidden={true}
+        />
+        {props.options.map((option) => {
+          const active = option.key === props.selected;
+          return (
+            <button
+              key={option.key}
+              type="button"
+              ref={active ? selectedRef : undefined}
+              className={`${styles.choicePill} ${active ? styles.choicePillActive : ''}`}
+              role="radio"
+              aria-checked={active}
+              disabled={props.disabled}
+              onClick={(event) => {
+                event.preventDefault();
+                pulseTrack(event.currentTarget);
+                props.onChange(option.key);
+              }}
+            >
+              {option.text}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadState> {
@@ -190,7 +322,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       historyFieldId: undefined,
       uploadType: UPLOAD_TYPE_NORMAL,
       labelType: LABEL_TYPE_NORMAL,
-      incomingLetterType: ''
+      incomingLetterType: '',
+      dearToSubjectText: ''
     };
   }
 
@@ -262,7 +395,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       fieldDebugMarks,
       historyFieldId,
       uploadType,
-      labelType
+      labelType,
+      incomingLetterType,
+      dearToSubjectText
     } = this.state;
     const busy = isProcessing || isUploading || isRestyling;
     const converted = pages.length > 0 && !isProcessing;
@@ -425,6 +560,16 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             </div>
             <div className={styles.fieldsBody}>
               <p className={styles.hint}>{strings.HighlightHint}</p>
+              {documentKind === 'incoming' && converted && incomingLetterType !== 'email' && (
+                <div className={styles.dearSubjectBox}>
+                  <div className={styles.dearSubjectLabel}>
+                    {strings.IncomingDearToSubjectLabel || 'Below Dear, above Subject'}
+                  </div>
+                  <pre className={`${styles.dearSubjectText} ${dearToSubjectText ? '' : styles.dearSubjectEmpty}`.trim()}>
+                    {dearToSubjectText || strings.IncomingDearToSubjectEmpty || 'No text found between Dear and Subject.'}
+                  </pre>
+                </div>
+              )}
               <div className={styles.fieldGroup}>
                 {fields.map((field) => (
                   <div
@@ -553,7 +698,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                                 ? strings.RegistrationNumberDescription
                                 : isProjectNumberField(field.label)
                                   ? (documentKind === 'incoming'
-                                    ? (strings.IncomingProjectNumberDescription || 'From Agreement No. or Contract No. below Dear, matched to Notification Set-up Project Name.')
+                                    ? (strings.IncomingProjectNumberDescription || 'From the text between Dear and Subject, matched to Notification Set-up Project Name.')
                                     : strings.ProjectNumberDescription)
                                   : undefined
                           }
@@ -702,23 +847,27 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
             <div className={styles.uploadBar}>
               <p className={styles.hint}>{strings.UploadHint}</p>
               <div className={styles.uploadSelectors}>
-                <Dropdown
-                  label={strings.UploadTypeLabel || 'Upload Type'}
-                  selectedKey={resolvedUploadType}
-                  options={this._uploadTypeOptions(projectNumber)}
-                  onChange={(_event, option) => this._onUploadTypeChange(option ? String(option.key) : UPLOAD_TYPE_NORMAL)}
-                  disabled={busy}
-                  className={styles.uploadType}
-                />
-                {documentKind === 'incoming' && (
-                  <Dropdown
-                    label={strings.LabelTypeLabel || 'Label Type'}
-                    selectedKey={labelType}
-                    options={this._labelTypeOptions()}
-                    onChange={(_event, option) => this._onLabelTypeChange(option ? String(option.key) : LABEL_TYPE_NORMAL)}
-                    disabled={busy}
-                    className={styles.labelType}
-                  />
+                {this._renderChoiceGroup(
+                  strings.UploadTypeLabel || 'Upload Type',
+                  resolvedUploadType,
+                  uploadTypeOptionsForProjectNumber(projectNumber).map((option) => ({
+                    key: option.key,
+                    text: this._uploadTypeLabel(option.key)
+                  })),
+                  (key) => this._onUploadTypeChange(key),
+                  busy,
+                  styles.uploadType
+                )}
+                {documentKind === 'incoming' && this._renderChoiceGroup(
+                  strings.LabelTypeLabel || 'Label Type',
+                  labelType,
+                  LABEL_TYPE_OPTIONS.map((option) => ({
+                    key: option.key,
+                    text: this._labelTypeLabel(option.key)
+                  })),
+                  (key) => this._onLabelTypeChange(key),
+                  busy,
+                  styles.labelType
                 )}
               </div>
               <div className={styles.destination}>
@@ -761,6 +910,26 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       </section>
     );
   }
+
+  private _renderChoiceGroup = (
+    label: string,
+    selected: string,
+    options: { key: string; text: string }[],
+    onChange: (key: string) => void,
+    disabled: boolean,
+    className?: string
+  ): React.ReactNode => {
+    return (
+      <AppleChoiceGroup
+        label={label}
+        selected={selected}
+        options={options}
+        onChange={onChange}
+        disabled={disabled}
+        className={className}
+      />
+    );
+  };
 
   private _pulseYesNo = (target: HTMLElement): void => {
     const group = target.closest(`.${styles.segmented}`) as HTMLElement | null;
@@ -1387,13 +1556,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     });
   };
 
-  private _uploadTypeOptions = (projectNumber?: string): IDropdownOption[] => {
-    return uploadTypeOptionsForProjectNumber(projectNumber || '').map((option) => ({
-      key: option.key,
-      text: this._uploadTypeLabel(option.key)
-    }));
-  };
-
   private _uploadTypeLabel = (uploadType: UploadType): string => {
     if (uploadType === 'confidentialInvoice') {
       return strings.UploadTypeConfidentialInvoice || 'Confidential Invoice';
@@ -1409,13 +1571,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     this.setState({
       uploadType: canonicalUploadTypeForProjectNumber(value, projectNumber)
     });
-  };
-
-  private _labelTypeOptions = (): IDropdownOption[] => {
-    return LABEL_TYPE_OPTIONS.map((option) => ({
-      key: option.key,
-      text: this._labelTypeLabel(option.key)
-    }));
   };
 
   private _labelTypeLabel = (labelType: LabelType): string => {
@@ -1530,7 +1685,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       selectedWordIndexes: [],
       fields: this._fieldsForSelectedFile(this.state.fields, selected.name),
       showRequiredErrors: false,
-      incomingLetterType: ''
+      incomingLetterType: '',
+      dearToSubjectText: ''
     });
   };
 
@@ -1782,6 +1938,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       warning: undefined,
       showRequiredErrors: false,
       incomingLetterType: '',
+      dearToSubjectText: '',
       pages: [],
       currentPage: 1,
       selectedWordIndexes: [],
@@ -1820,7 +1977,13 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       const previewPages = documentKind === 'incoming'
         ? keepIncomingEmailPreviewPages(result.pages)
         : result.pages;
-      let filled: { fields: IFormField[]; info: string | undefined; warning?: string; letterType: string };
+      let filled: {
+        fields: IFormField[];
+        info: string | undefined;
+        warning?: string;
+        letterType: string;
+        dearToSubjectText: string;
+      };
       this.setState({
         progress: {
           page: previewPages.length,
@@ -1832,7 +1995,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       try {
         filled = await this._fillFields(result.pages, documentKind);
       } catch {
-        filled = { fields: this.state.fields, info: undefined, letterType: '' };
+        filled = { fields: this.state.fields, info: undefined, letterType: '', dearToSubjectText: '' };
       }
       this.setState({
         pages: previewPages,
@@ -1845,6 +2008,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         info: filled.info,
         warning: filled.warning,
         incomingLetterType: documentKind === 'incoming' ? (filled.letterType || '') : '',
+        dearToSubjectText: filled.dearToSubjectText || '',
         uploadType: canonicalUploadTypeForProjectNumber(
           this.state.uploadType,
           this._namedValue(filled.fields, isProjectNumberField)
@@ -1866,6 +2030,7 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     info: string | undefined;
     warning?: string;
     letterType: string;
+    dearToSubjectText: string;
   }> => {
     const labels = this.state.fields.map((field) => field.label);
     const incoming = kind === 'incoming';
@@ -1927,29 +2092,20 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
     let warning: string | undefined;
     const incomingEmail = incoming && detected.letterType === 'email';
     if (incoming && !incomingEmail) {
-      const agreementNo = detected.agreementNo || '';
-      if (agreementNo) {
+      const projectNameHint = (detected.projectNameHint || detected.agreementNo || '').trim();
+      if (projectNameHint) {
         try {
           const setup = await lookupNotificationSetupByProjectName(
             this.props.spHttpClient,
             this.props.currentWebUrl,
-            agreementNo
+            projectNameHint
           );
-          if (setup.projectNumber) {
-            const projectNumber = sanitizeProjectNumber(setup.projectNumber);
-            fields = fields.map((field) => (
-              isProjectNumberField(field.label)
-                ? {
-                  ...field,
-                  value: this._normalizeFieldValue(field.label, projectNumber),
-                  debugSource: 'Notification Set-up'
-                }
-                : field
-            ));
+          fields = this._applyNotificationSetupLookup(fields, setup);
+          if (setup.projectNumber && !setup.leadingBl) {
             const leading = await lookupLeadingBlFromNotificationSetup(
               this.props.spHttpClient,
               this.props.currentWebUrl,
-              projectNumber
+              setup.projectNumber
             );
             fields = this._applyNotificationSetupLookup(fields, leading);
             if (leading.thresholdExceeded) {
@@ -2006,7 +2162,10 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       info,
       warning,
       fields,
-      letterType: incoming ? (detected.letterType || '') : ''
+      letterType: incoming ? (detected.letterType || '') : '',
+      dearToSubjectText: incoming && detected.letterType !== 'email'
+        ? (detected.projectNameHint || '').trim()
+        : ''
     };
   };
 
@@ -2085,7 +2244,8 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
       progress: undefined,
       uploadType: UPLOAD_TYPE_NORMAL,
       labelType: LABEL_TYPE_NORMAL,
-      incomingLetterType: ''
+      incomingLetterType: '',
+      dearToSubjectText: ''
     });
   };
 

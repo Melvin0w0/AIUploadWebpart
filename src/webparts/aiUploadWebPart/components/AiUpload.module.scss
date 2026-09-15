@@ -564,6 +564,35 @@
   color: var(--apple-secondary);
 }
 
+.dearSubjectBox {
+  margin: 0 4px 8px;
+  padding: 10px 12px;
+  border-radius: var(--apple-radius-sm);
+  background: var(--apple-card);
+  border: 1px solid var(--apple-separator);
+}
+
+.dearSubjectLabel {
+  font-size: 12px;
+  font-weight: 590;
+  color: var(--apple-secondary);
+  margin-bottom: 6px;
+}
+
+.dearSubjectText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--apple-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+
+.dearSubjectEmpty {
+  color: var(--apple-tertiary);
+}
+
 .fieldGroup {
   overflow: hidden;
   border-radius: var(--apple-radius-sm);
@@ -639,7 +668,7 @@
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
   padding: 2px;
-  background: var(--apple-fill);
+  background: #e8e8ed;
   border-radius: 9px;
   flex-shrink: 0;
   overflow: visible;
@@ -653,7 +682,7 @@
   height: calc(100% - 4px);
   border-radius: 7px;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
   transform: translateX(0);
   transition: transform 340ms cubic-bezier(0.32, 0.72, 0, 1);
   pointer-events: none;
@@ -669,7 +698,7 @@
   z-index: 1;
   border: none;
   background: transparent;
-  color: var(--apple-secondary);
+  color: var(--apple-tertiary);
   padding: 6px 14px;
   min-width: 52px;
   border-radius: 7px;
@@ -684,6 +713,7 @@
   color: var(--apple-text);
   background: transparent;
   box-shadow: none;
+  font-weight: 600;
 }
 
 .segment:disabled {
@@ -824,6 +854,8 @@
   .fieldCard,
   .segmentThumb,
   .segment,
+  .choicePill,
+  .choiceThumbReady,
   .datePicker :global(.ms-TextField-fieldGroup) {
     transition: none;
   }
@@ -1062,17 +1094,94 @@
 
 .uploadSelectors {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 12px;
-  align-items: flex-end;
+  align-items: stretch;
+}
+
+.choiceGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.choiceLabel {
+  font-size: 13px;
+  font-weight: 590;
+  color: var(--apple-secondary);
+}
+
+.choiceTrack {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  background: #e8e8ed;
+  border-radius: 10px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.choiceThumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, width, height;
+}
+
+.choiceThumbReady {
+  opacity: 1;
+  transition:
+    transform 380ms cubic-bezier(0.32, 0.72, 0, 1),
+    width 380ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 380ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.choicePill {
+  appearance: none;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--apple-tertiary);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 590;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: color 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.choicePill:hover:not(:disabled):not(.choicePillActive) {
+  color: var(--apple-secondary);
+}
+
+.choicePillActive {
+  background: transparent;
+  color: var(--apple-text);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.choicePill:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .uploadType,
 .labelType {
-  max-width: 320px;
-  margin: 4px 0 2px;
-  flex: 1;
-  min-width: 200px;
+  margin: 2px 0 0;
 }
 
 .destination {
@@ -1290,6 +1399,17 @@
     margin: 0 2px 2px;
   }
 
+  .dearSubjectBox {
+    margin: 0 2px 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+
+  .dearSubjectText {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
   .fieldGroup {
     border-radius: 12px;
   }
@@ -1343,6 +1463,17 @@
 
   .labelType {
     max-width: none;
+  }
+
+  .choiceLabel {
+    font-size: 13px;
+  }
+
+  .choicePill {
+    padding: 8px 16px;
+    font-size: 15px;
+    min-height: 36px;
+    border-radius: 8px;
   }
 
   .footerActions {

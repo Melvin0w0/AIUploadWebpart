@@ -88,6 +88,35 @@ export function extractIncomingAgreementNo(page?: IOcrPageResult): string {
   return joined && joined.value ? cleanIncomingAgreementValue(joined.value) : '';
 }
 
+export function extractIncomingDearToSubjectText(page?: IOcrPageResult): string {
+  if (!page) {
+    return '';
+  }
+  const lines = groupWordsIntoLines(page.words || []);
+  const texts = lines.map((line) => stripIncomingMarkup(line.text).replace(/\s+/g, ' ').trim());
+  const dearIndex = findIncomingSalutationIndex(texts);
+  const start = dearIndex >= 0 ? dearIndex + 1 : 0;
+  const end = findIncomingAgreementBandEnd(lines, texts, start);
+  const band: string[] = [];
+  if (dearIndex >= 0) {
+    const afterDear = textAfterIncomingSalutation(texts[dearIndex]);
+    if (afterDear) {
+      band.push(afterDear);
+    }
+  }
+  for (let index = start; index < end; index++) {
+    const text = texts[index];
+    if (!text || isIncomingDeliveryLine(text) || isIncomingMetaHeader(text) || isIncomingSalutation(text)) {
+      continue;
+    }
+    if (isIncomingSubjectLabelLine(text) || isIncomingSubjectBodyStart(text)) {
+      break;
+    }
+    band.push(text);
+  }
+  return band.join('\n').trim();
+}
+
 export function extractIncomingOrganization(page?: IOcrPageResult): string {
   return extractIncomingOrganizationLocated(page).value;
 }
