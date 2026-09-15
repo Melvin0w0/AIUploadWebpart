@@ -458,7 +458,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 14px 16px 10px;
+  padding: 10px 14px 8px;
   background: transparent;
   border-bottom: none;
 }
@@ -553,30 +553,32 @@
 .fieldsBody {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 0 12px 16px;
+  gap: 8px;
+  padding: 0 10px 12px;
 }
 
 .hint {
-  margin: 0 4px 4px;
-  font-size: 13px;
-  line-height: 1.4;
+  margin: 0 2px 0;
+  font-size: 12px;
+  line-height: 1.35;
   color: var(--apple-secondary);
 }
 
 .dearSubjectBox {
-  margin: 0 4px 8px;
-  padding: 10px 12px;
+  margin: 0 2px 2px;
+  padding: 8px 10px;
   border-radius: var(--apple-radius-sm);
-  background: var(--apple-card);
-  border: 1px solid var(--apple-separator);
+  background: var(--apple-fill);
+  border: none;
+  max-height: 72px;
+  overflow: auto;
 }
 
 .dearSubjectLabel {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 590;
   color: var(--apple-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .dearSubjectText {
@@ -593,16 +595,9 @@
   color: var(--apple-tertiary);
 }
 
-.fieldGroup {
-  overflow: hidden;
-  border-radius: var(--apple-radius-sm);
-  background: var(--apple-card);
-  border: 1px solid var(--apple-separator);
-}
-
 .fieldCard {
   position: relative;
-  padding: 10px 12px 12px;
+  padding: 5px 10px;
   border: none;
   border-bottom: 1px solid var(--apple-separator);
   border-radius: 0;
@@ -631,13 +626,58 @@
 
 .fieldRow {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
+}
+
+.fieldName {
+  flex: 0 0 120px;
+  width: 120px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.25;
+  color: var(--apple-text);
 }
 
 .fieldInput {
   flex: 1;
   min-width: 0;
+}
+
+.fieldGroup {
+  overflow: hidden;
+  border-radius: var(--apple-radius-sm);
+  background: var(--apple-card);
+  border: 1px solid var(--apple-separator);
+
+  :global {
+    .ms-TextField-fieldGroup,
+    .ms-DatePicker .ms-TextField-fieldGroup {
+      min-height: 32px;
+      border-radius: 8px;
+    }
+
+    .ms-TextField-field {
+      font-size: 13px;
+      padding: 0 10px;
+    }
+
+    .ms-TextField-description {
+      display: none;
+    }
+
+    .ms-Dropdown-title {
+      min-height: 32px;
+      line-height: 32px;
+      font-size: 13px;
+      border-radius: 8px;
+    }
+
+    .ms-Dropdown-caretDownWrapper {
+      height: 32px;
+      line-height: 32px;
+    }
+  }
 }
 
 .yesNoRow {
@@ -646,11 +686,13 @@
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  min-height: 36px;
+  min-height: 32px;
 }
 
 .yesNoLabel {
-  font-size: 15px;
+  flex: 0 0 120px;
+  width: 120px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--apple-text);
 }
@@ -1389,8 +1431,8 @@
   }
 
   .fieldsBody {
-    gap: 12px;
-    padding: 0 16px 18px;
+    gap: 10px;
+    padding: 0 12px 14px;
   }
 
   .hint {
@@ -1400,9 +1442,10 @@
   }
 
   .dearSubjectBox {
-    margin: 0 2px 10px;
-    padding: 12px 14px;
+    margin: 0 2px 6px;
+    padding: 10px 12px;
     border-radius: 12px;
+    max-height: 88px;
   }
 
   .dearSubjectText {
@@ -1415,15 +1458,18 @@
   }
 
   .fieldCard {
-    padding: 12px 16px 14px;
+    padding: 8px 12px;
+  }
+
+  .fieldName,
+  .yesNoLabel {
+    flex-basis: 112px;
+    width: 112px;
+    font-size: 15px;
   }
 
   .yesNoRow {
-    min-height: 44px;
-  }
-
-  .yesNoLabel {
-    font-size: 17px;
+    min-height: 36px;
   }
 
   .segmented {

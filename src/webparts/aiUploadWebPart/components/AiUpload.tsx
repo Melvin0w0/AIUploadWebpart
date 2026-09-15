@@ -7,7 +7,6 @@ import {
   Dropdown,
   IconButton,
   IDropdownOption,
-  Label,
   Link,
   PrimaryButton,
   ProgressIndicator,
@@ -581,32 +580,30 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                       this._renderYesNo(field)
                     ) : (
                     <div className={styles.fieldRow}>
+                      {this._renderFieldName(field, documentKind)}
                       {isLeadingBlField(field.label) ? (
                         <Dropdown
-                          label={field.label}
                           selectedKey={field.value || undefined}
                           options={this._leadingBlOptions(field.value)}
                           onChange={(_event, option) => this._onFieldValueChange(field.id, option ? String(option.key) : '')}
                           onFocus={() => this._setActiveField(field.id)}
                           placeholder={strings.LeadingBlPlaceholder}
-                          required={isRequiredField(field.label)}
+                          ariaLabel={field.label}
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
                         />
                       ) : isSubProjectNumberField(field.label) ? (
                         <Dropdown
-                          label={field.label}
                           selectedKey={canonicalSubProjectNumber(field.value)}
                           options={this._subProjectNumberOptions()}
                           onChange={(_event, option) => this._onFieldValueChange(field.id, option ? String(option.key) : SUB_PROJECT_NONE)}
                           onFocus={() => this._setActiveField(field.id)}
-                          required={isRequiredField(field.label)}
+                          ariaLabel={field.label}
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
                         />
                       ) : isIssueDateField(field.label) ? (
                         <div className={styles.fieldInput}>
-                          <Label>{ISSUE_DATE_DISPLAY_LABEL}</Label>
                           <DatePicker
                             className={styles.datePicker}
                             value={parseIssueDate(field.value)}
@@ -618,7 +615,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                             disableAutoFocus={true}
                             firstDayOfWeek={DayOfWeek.Monday}
                             strings={defaultDatePickerStrings}
-                            isRequired={isRequiredField(field.label)}
                             ariaLabel={ISSUE_DATE_DISPLAY_LABEL}
                             isMonthPickerVisible={false}
                             calendarProps={{
@@ -654,7 +650,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                             }}
                             textField={{
                               borderless: true,
-                              description: strings.IssueDateDescription || 'Date format: dd/MM/yyyy',
                               errorMessage: this._requiredError(field, markRequired),
                               onFocus: () => this._setActiveField(field.id),
                               onKeyDown: (event) => {
@@ -668,7 +663,6 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                       ) : (
                         <div className={styles.historyField}>
                         <TextField
-                          label={field.label}
                           value={field.value}
                           onChange={(_event, newValue) => this._onFieldValueChange(field.id, newValue || '')}
                           onFocus={() => {
@@ -689,22 +683,9 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
                                   ? strings.ProjectNumberPlaceholder
                                   : strings.FieldPlaceholder
                           }
-                          description={
-                            isNameField(field.label)
-                              ? (documentKind === 'incoming'
-                                ? (strings.IncomingNameDescription || 'Generated when Incoming is selected. This field is read only.')
-                                : strings.NameDescription)
-                              : isRegistrationNumberField(field.label)
-                                ? strings.RegistrationNumberDescription
-                                : isProjectNumberField(field.label)
-                                  ? (documentKind === 'incoming'
-                                    ? (strings.IncomingProjectNumberDescription || 'From the text between Dear and Subject, matched to Notification Set-up Project Name.')
-                                    : strings.ProjectNumberDescription)
-                                  : undefined
-                          }
+                          ariaLabel={field.label}
                           maxLength={isProjectNumberField(field.label) ? 8 : undefined}
                           readOnly={isReadOnlyFormField(field.label)}
-                          required={isRequiredField(field.label)}
                           errorMessage={this._requiredError(field, markRequired)}
                           className={styles.fieldInput}
                           borderless={true}
@@ -1039,6 +1020,37 @@ export default class AiUpload extends React.Component<IAiUploadProps, IAiUploadS
         )}
       </div>
     );
+  };
+
+  private _renderFieldName = (field: IFormField, documentKind: CorrespondenceKind): React.ReactNode => {
+    const hint = this._fieldHint(field.label, documentKind);
+    const text = isIssueDateField(field.label) ? ISSUE_DATE_DISPLAY_LABEL : field.label;
+    return (
+      <span className={styles.fieldName} title={hint}>
+        {text}
+        {isRequiredField(field.label) ? <span className={styles.required}> *</span> : undefined}
+      </span>
+    );
+  };
+
+  private _fieldHint = (label: string, documentKind: CorrespondenceKind): string | undefined => {
+    if (isNameField(label)) {
+      return documentKind === 'incoming'
+        ? (strings.IncomingNameDescription || 'Generated when Incoming is selected. This field is read only.')
+        : strings.NameDescription;
+    }
+    if (isRegistrationNumberField(label)) {
+      return strings.RegistrationNumberDescription;
+    }
+    if (isProjectNumberField(label)) {
+      return documentKind === 'incoming'
+        ? (strings.IncomingProjectNumberDescription || 'From the text between Dear and Subject, matched to Notification Set-up Project Name.')
+        : strings.ProjectNumberDescription;
+    }
+    if (isIssueDateField(label)) {
+      return strings.IssueDateDescription || 'Date format: dd/MM/yyyy';
+    }
+    return undefined;
   };
 
   private _renderYesNo = (field: IFormField): React.ReactNode => {
